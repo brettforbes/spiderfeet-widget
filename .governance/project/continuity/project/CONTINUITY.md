@@ -1,0 +1,22 @@
+# Project Continuity
+
+Durable project context (promoted from session/recent layers).
+
+## Bootstrap (2026-05-26)
+
+- VibeGov `init` completed pre-product-code.
+- Product intent **provisional** — template iFrame widget; spiderfeet-specific brief pending.
+- Active spec: `SPEC-001-bootstrap-governance-setup.md`.
+- GitHub Projects blocked: `gh auth refresh -s read:project,project`.
+- GitHub Issues disabled on remote repo.
+- Local `develop` branch created; `main` unprotected on remote.
+
+## Open loops
+
+- Validate product brief and replace provisional intent.
+- Enable Issues; configure branch protection; complete board setup via bootstrap `update`.
+
+## Norms
+
+- Governance rules: `.governance/rules/gov-*.mdc`
+- No product implementation until Pass Gate #1 satisfied and relevant INIT-TODO items cleared.
