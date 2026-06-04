@@ -16,7 +16,7 @@ This multi-root workspace includes:
 
 | Root folder | Role |
 |-------------|------|
-| `spiderfeet` | SpiderFoot fork — module analysis, governance, OSINT catalog |
+| `spiderfeet` | SpiderFeet fork — module analysis, governance, OSINT catalog |
 | `spiderfeet-widget` | Widget / visualization front-end |
 
 - Rules in each root are **independent** (`.cursor/rules/` does not cross roots).

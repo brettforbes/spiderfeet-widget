@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80" role="img" aria-label="SpiderFeet concept B">
+  <rect width="200" height="80" rx="12" fill="#16213e"/>
+  <circle cx="40" cy="40" r="22" fill="none" stroke="#53d8fb" stroke-width="4"/>
+  <text x="78" y="46" fill="#ffffff" font-family="Segoe UI,sans-serif" font-size="22" font-weight="700">SpiderFeet</text>
+  <text x="78" y="62" fill="#53d8fb" font-family="Segoe UI,sans-serif" font-size="10">Concept B  badge</text>
+</svg>

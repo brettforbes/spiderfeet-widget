@@ -1,53 +1,35 @@
-<h2>Page Content</h2>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-3" aria-label="SpiderFeet">
+  <div class="container-fluid">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+      <img src="logos/concept-b-badge.svg" alt="SpiderFeet" height="32" />
+      <span>SpiderFeet</span>
+    </a>
+    <span class="navbar-text text-muted small">Maps (placeholder)</span>
+  </div>
+</nav>
 
+<main class="container-fluid">
+  <h2 class="h5">Widget shell</h2>
+  <p class="text-muted">Non-Maps tabs are empty placeholders per Stage 1 plan. Parent ↔ iframe messaging demo below.</p>
 
-<h3>Get message from parent:</h3>
-
-<div>
+  <h3>Get message from parent</h3>
+  <div>
     <div id="message">Please send some message from the input above.</div>
     <script>
       window.addEventListener("message", function (event) {
-        console.log(["github receive",event]);
+        console.log(["github receive", event]);
         document.querySelector("#message").innerText =
           typeof event.data === "string"
             ? event.data
             : JSON.stringify(event.data);
       });
     </script>
-</div>
+  </div>
 
-<h3>Raise event to parent:</h3>
-
-
-<div>
-    <label for="messageText">Message:</label><br/>
-    <input style="margin-top: 1em" type="text" id="messageText" /><br/><br/>
-    <button id="sendMessage">Send Message to Parent</button><br/><br/>
-    <script>
-        // if messageText has user input and it has not be auto filled, then mark field as dirty
-        var messageText = document.querySelector("#messageText");
-        messageText.addEventListener("input", function () {
-            if (messageText.value !== "") {
-                messageText.classList.add("dirty");
-            }
-        });
-
-        var button = document.querySelector("#sendMessage");
-        button.addEventListener("click", function () {
-            var message = document.querySelector("#messageText").value;
-            // does messageText have class dirty? if not, then auto fill it
-            if (document.querySelector("#messageText").classList.contains("dirty") === false) {
-                message = "";
-            }
-
-            if (message === "") {
-                messageText.classList.remove("dirty");
-                message = "Hello from iframe! " + Math.random() + " " + new Date().toISOString();
-                document.querySelector("#messageText").value = message;
-            }
-            console.log(["github send",event]);
-            window.parent.postMessage(message, "*");
-        });
-    </script>
-    <button class="btn btn-primary" data-type="customevent">Raise Event</button><br/>
-</div>
+  <h3>Raise event to parent</h3>
+  <div>
+    <label for="messageText">Message:</label><br />
+    <input class="form-control mt-2" type="text" id="messageText" /><br /><br />
+    <button class="btn btn-primary" id="sendMessage" data-type="customevent">Send message to parent</button>
+  </div>
+</main>

@@ -1,8 +1,8 @@
 {
-    "name": "template-iframe-widget",
+    "name": "spiderfeet-widget",
     "version": "1.0.0",
-    "title": "Template iFrame Widget",
-    "description": "Template for creating widget to be used in iFrames.",
+    "title": "SpiderFeet Widget",
+    "description": "SpiderFeet iFrame widget for OSINT visualisation and host integration.",
     "main": "src/js/_index.js",
     "scripts": {
         "start": "cross-env NODE_ENV=development webpack serve --progress --live-reload --config webpack.dev.js",
@@ -14,7 +14,7 @@
     },
     "keywords": [],
     "author": "",
-    "license": "ISC",
+    "license": "Apache-2.0",
     "devDependencies": {
         "@babel/core": "^7.24.7",
         "@babel/plugin-proposal-class-properties": "^7.18.6",
