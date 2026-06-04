@@ -1,0 +1,45 @@
+---
+description: spiderfeet-widget — webpack iframe stack and build
+globs:
+  - "src/**"
+  - "webpack*.js"
+  - "package.json"
+alwaysApply: false
+---
+# Project: spiderfeet-widget stack
+
+## Stack
+
+- **Node** + webpack (`webpack.common.js`, `npm start` / `npm run build`)
+- **UI:** HTML in `src/html/content.html`, SASS → `src/sass/content.scss`
+- **JS:** IIFEs under `src/js/`, namespace `window.Widgets`
+- **Vendor bundle:** Bootstrap 5.3, jQuery, D3 (via webpack MergeIntoSingleFilePlugin)
+- **Output:** `dist/` — iFrame-embeddable `index.html`, `widget.js`, `widget.css`
+
+## Key paths
+
+| Artifact | Path |
+|----------|------|
+| Page markup | `src/html/content.html` |
+| Widget modules | `src/js/*.js` (concat order = folder order) |
+| Icons (from backend) | `src/assets/icons/` (copied from spiderfeet analysis) |
+| Force graph colours | `@spiderfeet/.docs/analysis/force_graph_colour_scheme.md` |
+
+## Skills
+
+- `.cursor/skills/bootstrap/SKILL.md` — layout, navbar, tabs, connection widget
+- `.cursor/skills/d3js/SKILL.md` — force graph, zoom, tooltips
+- `.cursor/skills/cursor-multi-repo/SKILL.md` — cross-root work
+
+## Conventions
+
+- `body { overflow: hidden }` — scroll inside panels, not the iframe body
+- Parent ↔ widget messaging via `Widgets.Events` (not ad-hoc postMessage)
+- Desktop-first layout (no mobile optimisation in stages 0–4)
+- Non-Maps tabs (Enrichments, Composer, Logs, Tests): empty placeholder pages until their stage stories land
+- API calls target spiderfeet FastAPI base URL (never TypeDB directly)
+
+## Verification
+
+- `npm run build` before merge
+- `npm start` for local dev (default port 4001)
