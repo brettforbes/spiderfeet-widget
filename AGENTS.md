@@ -7,14 +7,15 @@ This repository uses **VibeGov** governance. Read this file first, then follow l
 | Resource | Path / URL |
 |----------|------------|
 | Bootstrap contract | https://vibegov.io/docs/bootstrap |
-| Agent bootstrap | https://vibegov.io/agent.txt |
-| Bootstrap manifest | https://vibegov.io/bootstrap.json |
-| Governance rules (GOV-01…09) | `.governance/rules/gov-*.mdc` |
+| Governance rules | `.governance/rules/gov-*.mdc` (mirrored in `.cursor/rules/`) |
+| Project rules | `.governance/project/rules/` (mirrored in `.cursor/rules/proj-*.mdc`) |
 | Project intent | `.governance/project/PROJECT_INTENT.md` |
-| Active spec | `.governance/specs/SPEC-001-bootstrap-governance-setup.md` |
+| Active spec (bootstrap) | `.governance/specs/SPEC-001-bootstrap-governance-setup.md` |
+| Active spec (product) | `@spiderfeet/.governance/specs/SPEC-002-first-four-stages.md` |
 | Backlog | `.governance/project/BACKLOG.md` |
-| Bootstrap status (current) | `.governance/project/bootstrap/STATUS.md` |
-| Setup blockers / preflight | `INIT-TODO.md` |
+| Stage plan | `@spiderfeet/.seed/02_stage_by_stage_reengineer.md` |
+| Bootstrap status | `.governance/project/bootstrap/STATUS.md` |
+| Setup blockers | `INIT-TODO.md` |
 
 ## Delivery loop
 
@@ -34,20 +35,16 @@ This repository uses **VibeGov** governance. Read this file first, then follow l
 
 Full detail: `.governance/project/GIT_WORKFLOW.md`
 
+## Operating rules
+
+1. **Stage 0–4 work** must map to SPEC-002 requirement IDs (widget: R2-03-03, R2-04-04, etc.).
+2. Use **bootstrap** and **d3js** skills from spiderfeet for UI work (multi-root workspace).
+3. API calls go to spiderfeet FastAPI — never TypeDB from the browser.
+4. **Commit policy:** only when the operator explicitly requests commits.
+
 ## Continuity
 
 Checkpoint and promotion rules: `.governance/project/continuity/`
-
-## Hard gate
-
-Do not implement product features until:
-
-1. Pass Gate #1 in `.governance/project/bootstrap/STATUS.md` is satisfied (or blockers explicitly accepted), and
-2. `INIT-TODO.md` prerequisites for your task are complete.
-
-## Provider rules mirroring
-
-No provider-native rules directory detected. Use `.governance/rules/*.mdc` only (do not invent `.cursor/rules` placeholders).
 
 ## Issue pickup
 

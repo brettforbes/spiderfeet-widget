@@ -1,0 +1,37 @@
+---
+description: spiderfeet-widget Bootstrap 5 and D3 UI patterns
+globs:
+  - "src/html/**"
+  - "src/sass/**"
+  - "src/js/**"
+alwaysApply: false
+---
+# Project: Widget UI patterns
+
+Read **bootstrap** and **d3js** skills before editing UI.
+
+## Layout
+
+- Bootstrap 5.3 `container-fluid`, flex column, `vh-100` inside iframe
+- Navbar: logo left, connection widget right, theme toggle, five tab links
+- Light/dark via `data-bs-theme` toggle
+
+## Maps tab (stage 3)
+
+- Full-viewport D3 force graph; legend bottom-right
+- OSINT nodes 2× nugget size; fav_icon/logo toggle top-right
+- Layout buttons left; shadow-node toggle; filters from grouping doc
+- Tooltips (JSON), zoom/pan, drag-to-fix, RMB expand neighbours
+
+## Tests tab (stage 4)
+
+- Accordions grouped by `module_id`; summary table above list
+- Per-route: run button, CLI/API copy, mini graph, results/duration/status
+
+## Connection gating
+
+Until TypeDB connection valid via backend API, disable/grey non-connection UI.
+
+## Colour and icons
+
+Follow `@spiderfeet/.docs/analysis/force_graph_colour_scheme.md` and `src/assets/icons/`.

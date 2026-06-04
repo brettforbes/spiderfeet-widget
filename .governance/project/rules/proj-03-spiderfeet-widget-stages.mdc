@@ -1,0 +1,36 @@
+---
+description: spiderfeet-widget stages 0–4 program boundaries
+globs:
+alwaysApply: true
+---
+# Project: Stages 0–4 (widget scope)
+
+**Plan (backend):** `@spiderfeet/.seed/02_stage_by_stage_reengineer.md`  
+**Spec:** `@spiderfeet/.governance/specs/SPEC-002-first-four-stages.md`  
+**Issues:** `@spiderfeet/.seed/planning/github_issues_manifest.json`
+
+## Widget deliverables by stage
+
+| Stage | Widget epic | Focus |
+|-------|-------------|--------|
+| 0 | #1 | Governance, rules, intent |
+| 1 | #7 | Rebrand, Apache 2.0, logo in navbar |
+| 3 | #13 | Maps tab — D3 force graph, connection widget, filters |
+| 4 | #32 | Tests tab — module/route test UI |
+
+Stages 2 and backend-only work have **no widget epic**.
+
+## UI shell (stage 3+)
+
+Navbar tabs: **Enrichments** (default), **Composer**, **Maps**, **Logs**, **Tests**.  
+Only **Maps** and **Tests** are implemented in stages 3–4; others remain **empty placeholder pages**.
+
+## Out of scope (stages 0–4)
+
+Stages 5–8 UI (investigation workspace, quarantine tooling, favourites runner).
+
+## Execution
+
+1. Bind to SPEC-002 R2-03-03 / R2-04-04 when implementing UI stories
+2. Branch `feature/<issue>-<slug>`; PR to `develop`
+3. Exploratory review on Maps (#SFW-03-18) and Tests (#SFW-04-09) per GOV-08

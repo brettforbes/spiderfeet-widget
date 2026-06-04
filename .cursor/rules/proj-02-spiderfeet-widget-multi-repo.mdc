@@ -1,0 +1,26 @@
+---
+description: spiderfeet-widget multi-repo coordination with spiderfeet backend
+globs:
+alwaysApply: true
+---
+# Project: Multi-repo (spiderfeet-widget + spiderfeet)
+
+## Roots
+
+| Root | Repo | Role |
+|------|------|------|
+| `spiderfeet-widget` | `brettforbes/spiderfeet-widget` | iFrame UI (this repo) |
+| `spiderfeet` | `brettforbes/spiderfeet` | Python backend, FastAPI, TypeDB |
+
+Open both via `@spiderfeet/.seed/spiderfeet_complete.code-workspace`.
+
+## Rules
+
+- Cross-reference: `@spiderfeet/.docs/...`, `@spiderfeet-widget/src/...`
+- Stage 3+ UI consumes backend REST APIs only
+- Copy shared assets (nugget icons, colour scheme docs) from spiderfeet when issues specify
+- Link related GitHub issues across repos in issue bodies
+
+## Skill
+
+`.cursor/skills/cursor-multi-repo/SKILL.md`

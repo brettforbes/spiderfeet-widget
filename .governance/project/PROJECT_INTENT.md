@@ -1,49 +1,49 @@
 # Project Intent
 
-**Status:** Provisional — validated product brief not yet established.
+**Status:** Active — first-four-stages program (2026-06-03)  
+**Spec:** SPEC-002 (canonical copy in spiderfeet repo)  
+**Plan:** `@spiderfeet/.seed/02_stage_by_stage_reengineer.md`
 
-## Purpose
+## Summary
 
-This repository is an **iFrame embeddable widget template** (webpack-based HTML/SASS/JS) intended as a starting point for experiences embedded in parent applications via iFrames. The README describes template mechanics (build, assets, events) rather than a specific product mission for *this* fork.
+**spiderfeet-widget** is the iFrame embeddable front-end for the Spiderfeet v2 platform. It renders Bootstrap 5 layouts and D3 force graphs, calling the **spiderfeet** FastAPI backend for TypeDB map data and module testing.
 
-Until a validated product brief exists, do not infer product scope from the repository name (`spiderfeet-widget`) or template README alone.
+## Goals (widget, stages 0–4)
 
-## Context
+1. **Governed delivery** — project rules + VibeGov; GitHub issues per epic/story
+2. **Rebrand** — template → Spiderfeet; Apache 2.0; logo in navbar (stage 1)
+3. **Maps UI** — connection widget, force graph of `spiderfeet-map`, filters, layouts (stage 3)
+4. **Tests UI** — module/route test accordions, summary metrics, scan-record mini graphs (stage 4)
+5. **Embed contract** — remain iFrame-friendly; `Widgets.Events` for parent apps
 
-- **Stack:** Node/webpack, SASS, jQuery/Bootstrap/D3 vendor bundle pattern, custom widget namespace (`window.Widgets`).
-- **Integration model:** Parent app ↔ widget via `window.Widgets.Events` (raise/listen/emit).
-- **Hosting:** Public GitHub repo `brettforbes/spiderfeet-widget`.
-- **Governance:** VibeGov bootstrap `init` completed pre-implementation (see `.governance/project/bootstrap/STATUS.md`).
+## Non-goals (stages 0–4)
 
-## Constraints
+- Full Enrichments / Composer / Logs tabs (empty placeholders only)
+- Direct TypeDB access from the browser
+- Mobile layout optimisation
+- Investigation workspace (stage 8)
 
-- Widget code must remain embeddable (iFrame-friendly build output).
-- Follow existing JS namespacing conventions in `src/js/`.
-- Strict Git workflow: `main` (promotion), `develop` (integration), issue-scoped branches (see `.governance/project/GIT_WORKFLOW.md`).
+## Stack
 
-## Risks
+- webpack, SASS, `window.Widgets` IIFEs, Bootstrap 5.3 + D3 in vendor bundle
+- Dev: `npm start` (port 4001); release: `npm run build` → `dist/`
 
-- Product intent may be assumed from template docs or repo name without stakeholder confirmation.
-- GitHub Issues are **disabled** on the remote repo — issue-driven workflow requires enabling Issues or an alternate tracker.
-- GitHub Projects automation blocked until `read:project` / `project` scopes are granted to `gh`.
+## Stakeholders
 
-## Assumptions
+- **Operator:** Brett Forbes
+- **Backend repo:** `brettforbes/spiderfeet`
 
-- This fork will customize the template for a specific widget experience once intent is confirmed.
-- Governance and bootstrap setup precede feature implementation (`SPEC-001` bootstrap spec).
+## Success signals
 
-## Key Behaviors
+- Maps and Tests tabs meet SPEC-002 and pass GOV-08 exploratory review
+- Build and lint green on PR
+- Cross-repo issues linked to backend epics
 
-- Build produces distributable widget assets for iFrame embedding.
-- Widget communicates with parent via documented event APIs.
-- Governed delivery follows Observe → Plan → Implement → Verify → Document.
+## References
 
-## Verification Expectations
-
-- `npm run build` succeeds for release artifacts.
-- Lint (`npm run lint`) used where applicable before merge.
-- Acceptance criteria live in active specs under `.governance/specs/`.
-
-## Next decision needed
-
-Replace provisional intent with a validated brief: problem, users, success metrics, and non-goals for the *spiderfeet* widget specifically.
+| Resource | Path |
+|----------|------|
+| SPEC-002 | `@spiderfeet/.governance/specs/SPEC-002-first-four-stages.md` |
+| Bootstrap skill | `.cursor/skills/bootstrap/SKILL.md` (install from spiderfeet if missing) |
+| D3 skill | `@spiderfeet/.cursor/skills/d3js/SKILL.md` |
+| Issue manifest | `@spiderfeet/.seed/planning/github_issues_manifest.json` |
