@@ -27,17 +27,13 @@ npm run build
 
 Output: `dist/index.html`, `dist/widget.js`, `dist/widget.css`, vendor bundles.
 
-## Logo concepts (operator choice)
+## Branding (provisional)
 
-Same three provisional marks as the backend repo — select one in cross-repo issue **X-01-01**:
+Same operator-supplied stacked mark as the backend repo (replace when firm/final artwork arrives):
 
-| Concept | Description | Preview |
-|---------|-------------|---------|
-| **A** | Minimal icon | ![Concept A](.docs/branding/logos/concept-a-minimal.svg) |
-| **B** | Badge + wordmark | ![Concept B](.docs/branding/logos/concept-b-badge.svg) |
-| **C** | Wordmark underline | ![Concept C](.docs/branding/logos/concept-c-wordmark.svg) |
+![SpiderFeet provisional logo](.docs/branding/spiderfeet-light-stacked.png)
 
-The dev UI navbar uses **Concept B** as a placeholder until final logo selection.
+Navbar: `src/assets/logos/spiderfeet-light-stacked.png` — see [.docs/branding/README.md](.docs/branding/README.md).
 
 ## Where to add code
 
