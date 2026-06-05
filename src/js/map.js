@@ -1,36 +1,20 @@
 window.Widgets = window.Widgets || {};
 window.Widgets.Map = window.Widgets.Map || {};
 
-(function ($, Map, Widgets, Events, document, window) {
+(function ($, Map, Widgets, Events, Connection, document, window) {
   'use strict';
 
   Map.selectorPanel = '[data-widget="maps-panel"]';
-  Map.selectorConnection = '[data-widget="map-connection"]';
-
-  Map.DEFAULT_API_BASE = 'http://127.0.0.1:8001/api/v1';
   Map.SERVICE_COLOUR = '#6366f1';
   Map.NUGGET_FALLBACK = '#3b82f6';
 
   Map._graphInstance = null;
   Map._connected = false;
   Map._variant = 'default';
-  Map._apiBase = Map.DEFAULT_API_BASE;
-
-  Map.apiUrl = function (path) {
-    const base = Map._apiBase.replace(/\/$/, '');
-    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
-  };
 
   Map.setStatus = function (message) {
     const el = document.getElementById('map-status-text');
     if (el) el.textContent = message;
-  };
-
-  Map.setConnectionBadge = function (text, tone) {
-    const badge = document.getElementById('connection-badge');
-    if (!badge) return;
-    badge.textContent = text;
-    badge.className = `badge rounded-pill text-bg-${tone || 'secondary'}`;
   };
 
   Map.setInventory = function (inventory) {
@@ -42,7 +26,7 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map.setControlsEnabled = function (enabled) {
-    document.querySelectorAll('[data-action="refresh-graph"]').forEach((btn) => {
+    document.querySelectorAll('#pane-maps [data-action="refresh-graph"]').forEach((btn) => {
       btn.disabled = !enabled;
     });
     document.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
@@ -133,42 +117,6 @@ window.Widgets.Map = window.Widgets.Map || {};
     Map.setStatus(`Graph loaded (${nodes.length} nodes, ${links.length} links)`);
   };
 
-  Map.fetchJson = async function (path, options) {
-    const response = await fetch(Map.apiUrl(path), options);
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`${response.status} ${response.statusText}: ${detail}`);
-    }
-    return response.json();
-  };
-
-  Map.refreshStatus = async function () {
-    Map.setConnectionBadge('Checking…', 'secondary');
-    Map.setStatus('Checking API and TypeDB…');
-
-    try {
-      const status = await Map.fetchJson('/map/status');
-      Map._connected = Boolean(status.reachable);
-      if (status.reachable) {
-        Map.setConnectionBadge(`Connected · ${status.database}`, 'success');
-        Map.setInventory(status.inventory);
-        Map.setControlsEnabled(true);
-        Map.setStatus(`TypeDB reachable (${status.database})`);
-        return status;
-      }
-      Map.setConnectionBadge('Unreachable', 'warning');
-      Map.setControlsEnabled(false);
-      Map.setStatus('API reachable but TypeDB is not');
-      return status;
-    } catch (err) {
-      Map._connected = false;
-      Map.setConnectionBadge('Offline', 'danger');
-      Map.setControlsEnabled(false);
-      Map.setStatus(`Connection failed: ${err.message}`);
-      throw err;
-    }
-  };
-
   Map.loadGraph = async function () {
     if (!Map._connected) {
       Map.showEmpty(true);
@@ -180,27 +128,13 @@ window.Widgets.Map = window.Widgets.Map || {};
     Map.showEmpty(false);
 
     try {
-      const graph = await Map.fetchJson('/map/graph');
+      const graph = await Connection.fetchJson('/map/graph');
       Map.renderGraph(graph);
     } catch (err) {
       Map.showEmpty(true);
       Map.setStatus(`Graph load failed: ${err.message}`);
     } finally {
       Map.showSpinner(false);
-    }
-  };
-
-  Map.ping = async function () {
-    try {
-      const ping = await Map.fetchJson('/map/connection/ping', { method: 'POST' });
-      if (ping.reachable) {
-        Map.setConnectionBadge(`Ping OK · ${ping.database}`, 'success');
-      } else {
-        Map.setConnectionBadge('Ping failed', 'warning');
-      }
-    } catch (err) {
-      Map.setConnectionBadge('Ping error', 'danger');
-      Map.setStatus(`Ping failed: ${err.message}`);
     }
   };
 
@@ -213,23 +147,23 @@ window.Widgets.Map = window.Widgets.Map || {};
     }
   };
 
-  Map.bindPanel = function (root) {
-    const apiBase = document.getElementById('widget-root')?.dataset.apiBase;
-    if (apiBase) Map._apiBase = apiBase;
-
-    root.querySelectorAll('[data-action="refresh-graph"]').forEach((btn) => {
-      btn.addEventListener('click', () => Map.loadGraph());
-    });
-
-    root.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
-      btn.addEventListener('click', () => Map.setVariant(btn.dataset.variant));
-    });
-  };
-
-  Map.bindConnection = function (root) {
-    root.querySelector('[data-action="ping"]')?.addEventListener('click', () => {
-      Map.ping().then(() => Map.refreshStatus());
-    });
+  Map.onConnectionChange = function (connected, status) {
+    Map._connected = connected;
+    Map.setControlsEnabled(connected);
+    if (status?.inventory) {
+      Map.setInventory(status.inventory);
+    }
+    if (connected) {
+      Map.setStatus(`TypeDB reachable (${status?.database || 'spiderfeet-map'})`);
+      if (document.getElementById('pane-maps')?.classList.contains('active')) {
+        Map.loadGraph();
+      }
+    } else {
+      Map.showEmpty(true);
+      Map.setStatus(
+        status ? 'API reachable but TypeDB is not' : 'Waiting for API connection…'
+      );
+    }
   };
 
   Map.initPanel = function ($root) {
@@ -237,38 +171,37 @@ window.Widgets.Map = window.Widgets.Map || {};
     if (el.dataset.initialized) return;
     el.dataset.initialized = 'true';
 
-    Map.bindPanel(el);
+    el.querySelectorAll('[data-action="refresh-graph"]').forEach((btn) => {
+      btn.addEventListener('click', () => Map.loadGraph());
+    });
+
+    el.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
+      btn.addEventListener('click', () => Map.setVariant(btn.dataset.variant));
+    });
+
     Map.setVariantButtons(Map._variant);
-    Map.setControlsEnabled(false);
+    Map.setControlsEnabled(Connection.isConnected());
     Map.showEmpty(true);
 
-    Map.refreshStatus()
-      .then((status) => {
-        if (status?.reachable) {
-          return Map.loadGraph();
-        }
-        Map.showEmpty(true);
-        return null;
-      })
-      .catch(() => {
-        Map.showEmpty(true);
-      });
-  };
+    Connection.onStatusChange(Map.onConnectionChange);
+    if (Connection._lastStatus) {
+      Map.onConnectionChange(Connection.isConnected(), Connection._lastStatus);
+    }
 
-  Map.initConnection = function ($root) {
-    const el = $root[0];
-    if (el.dataset.initialized) return;
-    el.dataset.initialized = 'true';
-    Map.bindConnection(el);
+    window.addEventListener('shell:tab-changed', (event) => {
+      if (event.detail?.tabId === 'maps' && Map._connected && !Map._graphInstance) {
+        Map.loadGraph();
+      }
+    });
   };
 
   Widgets.watchDOMForComponent(Map.selectorPanel, Map.initPanel);
-  Widgets.watchDOMForComponent(Map.selectorConnection, Map.initConnection);
 })(
   window.jQuery,
   window.Widgets.Map,
   window.Widgets,
   window.Widgets.Events,
+  window.Widgets.Connection,
   document,
   window
 );

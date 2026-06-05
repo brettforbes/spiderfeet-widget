@@ -40,6 +40,7 @@
             <button
               class="nav-link active text-white px-2 py-1"
               type="button"
+              data-shell-tab="maps"
               aria-current="page"
             >
               Maps
@@ -59,8 +60,7 @@
             <button
               class="nav-link text-white-50 px-2 py-1"
               type="button"
-              disabled
-              title="Stage 4 — not yet implemented"
+              data-shell-tab="tests"
             >
               Tests
             </button>
@@ -97,7 +97,7 @@
       class="tab-pane fade show active flex-grow-1 d-flex flex-column overflow-hidden"
       id="pane-maps"
       role="tabpanel"
-      aria-labelledby="tab-maps"
+      data-shell-pane="maps"
       data-widget="maps-panel"
     >
       <div class="row g-0 flex-grow-1 overflow-hidden">
@@ -240,6 +240,82 @@
           >
             <span id="map-status-text">Ready</span>
             <span id="map-node-count"></span>
+          </footer>
+        </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-tests"
+      role="tabpanel"
+      data-shell-pane="tests"
+      data-widget="tests-panel"
+    >
+      <div class="row g-0 flex-grow-1 overflow-hidden">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body" aria-label="Test filters">
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
+          <div class="mb-3">
+            <label for="tests-search" class="form-label small">Search modules</label>
+            <input
+              type="search"
+              class="form-control form-control-sm"
+              id="tests-search"
+              placeholder="e.g. dnsresolve"
+              disabled
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-3"
+            id="tests-refresh"
+            disabled
+          >
+            Refresh catalog
+          </button>
+          <p class="small text-body-secondary mb-0">
+            Route execution arrives in Stage 4c. This view lists the module route matrix from the API catalog.
+          </p>
+        </aside>
+
+        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden">
+          <div class="p-3 border-bottom bg-body">
+            <h2 class="h6 text-uppercase text-body-secondary mb-2">Coverage summary</h2>
+            <dl class="row small mb-0" id="tests-summary">
+              <dt class="col-6 col-lg-3">Modules</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="modules">—</dd>
+              <dt class="col-6 col-lg-3">Routes</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="routes">—</dd>
+              <dt class="col-6 col-lg-3">Groups</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="groups">—</dd>
+              <dt class="col-6 col-lg-3">Not started</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="not-started">—</dd>
+              <dt class="col-6 col-lg-3">In test</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="in-test">—</dd>
+              <dt class="col-6 col-lg-3">Tested</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="tested">—</dd>
+            </dl>
+          </div>
+
+          <div class="flex-grow-1 overflow-auto position-relative p-3">
+            <div
+              id="tests-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading tests catalog</span>
+              </div>
+            </div>
+
+            <div class="accordion" id="tests-module-accordion"></div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary"
+            id="tests-status"
+            aria-live="polite"
+          >
+            <span id="tests-status-text">Connect to the API to load the test catalog.</span>
           </footer>
         </main>
       </div>
