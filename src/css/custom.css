@@ -71,6 +71,10 @@ body {
   opacity: 0.95;
 }
 
-#map-layout-buttons .btn.active {
-  font-weight: 600;
+#tests-module-accordion .accordion-button {
+  font-size: 0.875rem;
+}
+
+#tests-module-accordion .accordion-button:not(.collapsed) {
+  background-color: var(--bs-tertiary-bg);
 }
