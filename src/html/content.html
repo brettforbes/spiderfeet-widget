@@ -7,11 +7,13 @@
   <header class="border-bottom bg-body-tertiary">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
       <div class="container-fluid p-0">
-        <a class="navbar-brand me-3" href="#">
+        <a class="navbar-brand me-3 py-0" href="#">
           <img
-            src="logos/spiderfeet-light-stacked.png"
+            src="logos/spiderfeet_logo_horizontal_dark.svg"
             alt="SpiderFeet"
             class="navbar-brand-logo"
+            width="336"
+            height="64"
           />
         </a>
 
@@ -100,7 +102,7 @@
       data-shell-pane="maps"
       data-widget="maps-panel"
     >
-      <div class="row g-0 flex-grow-1 overflow-hidden">
+      <div class="row g-0 flex-grow-1 overflow-hidden h-100">
         <aside
           class="col-12 col-md-3 border-end overflow-auto p-3 bg-body"
           id="map-sidebar"
@@ -161,6 +163,33 @@
             </button>
           </div>
 
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Nodes</h2>
+          <div
+            class="btn-group-vertical w-100 mb-3"
+            role="group"
+            aria-label="Node display mode"
+            id="map-node-display-buttons"
+          >
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-node-display="circles"
+              aria-pressed="true"
+              disabled
+            >
+              Circles
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-node-display="icons"
+              aria-pressed="false"
+              disabled
+            >
+              Icons
+            </button>
+          </div>
+
           <button
             type="button"
             class="btn btn-primary btn-sm w-100 mb-2"
@@ -174,7 +203,7 @@
           </p>
         </aside>
 
-        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden p-0 position-relative">
+        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden p-0 position-relative h-100">
           <div id="viz-stage" class="flex-grow-1 position-relative bg-body-secondary overflow-hidden">
             <div
               id="viz-spinner"
