@@ -1,34 +1,248 @@
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-3" aria-label="SpiderFeet">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="#">
-      <img src="logos/spiderfeet-light-stacked.png" alt="SpiderFeet" class="navbar-brand-logo" />
-    </a>
-    <span class="navbar-text text-muted small">Maps (placeholder)</span>
-  </div>
-</nav>
+<div
+  class="container-fluid vh-100 d-flex flex-column p-0"
+  data-bs-theme="light"
+  id="widget-root"
+  data-api-base="http://127.0.0.1:8001/api/v1"
+>
+  <header class="border-bottom bg-body-tertiary">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
+      <div class="container-fluid p-0">
+        <a class="navbar-brand me-3" href="#">
+          <img
+            src="logos/spiderfeet-light-stacked.png"
+            alt="SpiderFeet"
+            class="navbar-brand-logo"
+          />
+        </a>
 
-<main class="container-fluid">
-  <h2 class="h5">Widget shell</h2>
-  <p class="text-muted">Non-Maps tabs are empty placeholders per Stage 1 plan. Parent ↔ iframe messaging demo below.</p>
+        <ul class="navbar-nav flex-row gap-1 me-auto" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 2 — not yet implemented"
+            >
+              Enrichments
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 2 — not yet implemented"
+            >
+              Composer
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link active text-white px-2 py-1"
+              type="button"
+              aria-current="page"
+            >
+              Maps
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 5 — not yet implemented"
+            >
+              Logs
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 4 — not yet implemented"
+            >
+              Tests
+            </button>
+          </li>
+        </ul>
 
-  <h3>Get message from parent</h3>
-  <div>
-    <div id="message">Please send some message from the input above.</div>
-    <script>
-      window.addEventListener("message", function (event) {
-        console.log(["github receive", event]);
-        document.querySelector("#message").innerText =
-          typeof event.data === "string"
-            ? event.data
-            : JSON.stringify(event.data);
-      });
-    </script>
-  </div>
+        <div
+          class="d-flex align-items-center gap-2"
+          data-widget="map-connection"
+          id="map-connection"
+        >
+          <span
+            class="badge rounded-pill text-bg-secondary"
+            id="connection-badge"
+            aria-live="polite"
+          >
+            Checking…
+          </span>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-light"
+            data-action="ping"
+            aria-label="Test TypeDB connection"
+          >
+            Ping
+          </button>
+        </div>
+      </div>
+    </nav>
+  </header>
 
-  <h3>Raise event to parent</h3>
-  <div>
-    <label for="messageText">Message:</label><br />
-    <input class="form-control mt-2" type="text" id="messageText" /><br /><br />
-    <button class="btn btn-primary" id="sendMessage" data-type="customevent">Send message to parent</button>
+  <div class="tab-content flex-grow-1 overflow-hidden d-flex flex-column">
+    <div
+      class="tab-pane fade show active flex-grow-1 d-flex flex-column overflow-hidden"
+      id="pane-maps"
+      role="tabpanel"
+      aria-labelledby="tab-maps"
+      data-widget="maps-panel"
+    >
+      <div class="row g-0 flex-grow-1 overflow-hidden">
+        <aside
+          class="col-12 col-md-3 border-end overflow-auto p-3 bg-body"
+          id="map-sidebar"
+          aria-label="Map filters and inventory"
+        >
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Inventory</h2>
+          <dl class="row small mb-4" id="map-inventory">
+            <dt class="col-7">Nuggets</dt>
+            <dd class="col-5 text-end mb-1" data-count="nuggets">—</dd>
+            <dt class="col-7">OSINT services</dt>
+            <dd class="col-5 text-end mb-1" data-count="services">—</dd>
+            <dt class="col-7">Links</dt>
+            <dd class="col-5 text-end mb-1" data-count="links">—</dd>
+          </dl>
+
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Layout</h2>
+          <div
+            class="btn-group-vertical w-100 mb-3"
+            role="group"
+            aria-label="Force layout variant"
+            id="map-layout-buttons"
+          >
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="default"
+              aria-pressed="true"
+              disabled
+            >
+              Default
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="sparse"
+              aria-pressed="false"
+              disabled
+            >
+              Sparse
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="grouped"
+              aria-pressed="false"
+              disabled
+            >
+              Grouped
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="dense"
+              aria-pressed="false"
+              disabled
+            >
+              Dense
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-2"
+            data-action="refresh-graph"
+            disabled
+          >
+            Refresh graph
+          </button>
+          <p class="small text-body-secondary mb-0" id="map-sidebar-hint">
+            Connect to the SpiderFeet API and ensure TypeDB is running.
+          </p>
+        </aside>
+
+        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden p-0 position-relative">
+          <div id="viz-stage" class="flex-grow-1 position-relative bg-body-secondary overflow-hidden">
+            <div
+              id="viz-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+              aria-hidden="true"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading graph</span>
+              </div>
+            </div>
+
+            <div
+              id="viz-empty"
+              class="position-absolute top-50 start-50 translate-middle text-center px-3 d-none"
+            >
+              <p class="text-body-secondary mb-2">No graph data yet.</p>
+              <button type="button" class="btn btn-sm btn-primary" data-action="refresh-graph">
+                Load graph
+              </button>
+            </div>
+
+            <svg
+              id="graph"
+              class="viz-layer w-100 h-100"
+              role="img"
+              aria-label="OSINT map force graph"
+            ></svg>
+
+            <div
+              id="tooltip"
+              class="viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+              hidden
+            ></div>
+
+            <div
+              class="position-absolute bottom-0 end-0 m-3 p-2 border rounded bg-body small shadow-sm"
+              id="map-legend"
+              aria-label="Graph legend"
+            >
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="legend-swatch legend-swatch-service"></span>
+                <span>OSINT service</span>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="legend-swatch legend-swatch-nugget"></span>
+                <span>Nugget</span>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <span class="legend-line legend-line-consumed"></span>
+                <span>Consumed</span>
+              </div>
+              <div class="d-flex align-items-center gap-2 mt-1">
+                <span class="legend-line legend-line-produced"></span>
+                <span>Produced</span>
+              </div>
+            </div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary d-flex justify-content-between"
+            id="map-status"
+            aria-live="polite"
+          >
+            <span id="map-status-text">Ready</span>
+            <span id="map-node-count"></span>
+          </footer>
+        </main>
+      </div>
+    </div>
   </div>
-</main>
+</div>
