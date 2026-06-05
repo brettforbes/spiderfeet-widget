@@ -7,10 +7,22 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map.selectorPanel = '[data-widget="maps-panel"]';
   Map.SERVICE_COLOUR = '#6366f1';
   Map.NUGGET_FALLBACK = '#3b82f6';
+  Map.SERVICE_ICON = 'icon_software_used.svg';
+  Map.ICON_BASE = 'icons/';
 
   Map._graphInstance = null;
+  Map._renderGeneration = 0;
   Map._connected = false;
   Map._variant = 'default';
+  Map._nodeDisplay = 'circles';
+  Map._lastGraphPayload = null;
+
+  Map.iconUrl = function (filename) {
+    if (!filename) return '';
+    if (Map.isRemoteIcon(filename)) return filename;
+    const name = String(filename).replace(/^icons\//, '');
+    return `${Map.ICON_BASE}${name}`;
+  };
 
   Map.setStatus = function (message) {
     const el = document.getElementById('map-status-text');
@@ -32,6 +44,9 @@ window.Widgets.Map = window.Widgets.Map || {};
     document.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
       btn.disabled = !enabled;
     });
+    document.querySelectorAll('#map-node-display-buttons [data-node-display]').forEach((btn) => {
+      btn.disabled = !enabled;
+    });
   };
 
   Map.setVariantButtons = function (active) {
@@ -40,6 +55,35 @@ window.Widgets.Map = window.Widgets.Map || {};
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+  };
+
+  Map.setNodeDisplayButtons = function (active) {
+    document.querySelectorAll('#map-node-display-buttons [data-node-display]').forEach((btn) => {
+      const on = btn.dataset.nodeDisplay === active;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+
+  Map.isRemoteIcon = function (value) {
+    return typeof value === 'string' && /^https?:\/\//i.test(value);
+  };
+
+  Map.nuggetIconFilename = function (node) {
+    if (node.icon) {
+      return node.icon;
+    }
+    return `icon_${String(node.id).toLowerCase()}.svg`;
+  };
+
+  Map.resolveNodeIconUrl = function (node) {
+    if (node.kind === 'osint-service') {
+      if (Map.isRemoteIcon(node.fav_icon)) {
+        return node.fav_icon;
+      }
+      return Map.iconUrl(Map.SERVICE_ICON);
+    }
+    return Map.iconUrl(Map.nuggetIconFilename(node));
   };
 
   Map.showSpinner = function (show) {
@@ -53,15 +97,20 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map.transformGraph = function (payload) {
     const nodes = (payload.nodes || []).map((n) => {
       const isService = n.kind === 'osint-service';
+      const nuggetIcon = Map.nuggetIconFilename(n);
       return {
         id: n.id,
         group: isService ? 'service' : 'nugget',
         label: n.label || n.id,
         r: isService ? 14 : 7,
+        iconSize: isService ? 40 : 28,
+        iconUrl: Map.resolveNodeIconUrl(n),
+        iconFallbackUrl: isService ? Map.iconUrl(Map.SERVICE_ICON) : null,
         colour: n.colour || (isService ? Map.SERVICE_COLOUR : Map.NUGGET_FALLBACK),
         meta: {
           service_state: n.service_state,
           kind: n.kind,
+          icon: isService ? n.fav_icon : nuggetIcon,
         },
       };
     });
@@ -75,7 +124,33 @@ window.Widgets.Map = window.Widgets.Map || {};
     return { nodes, links };
   };
 
+  Map.whenVizStageReady = function (callback) {
+    const stage = document.getElementById('viz-stage');
+    if (!stage) {
+      callback();
+      return;
+    }
+    let attempts = 0;
+    const tryReady = () => {
+      const rect = stage.getBoundingClientRect();
+      if (rect.width > 20 && rect.height > 20) {
+        callback();
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) {
+        callback();
+        return;
+      }
+      requestAnimationFrame(tryReady);
+    };
+    tryReady();
+  };
+
   Map.renderGraph = function (payload) {
+    Map._lastGraphPayload = payload;
+    const generation = ++Map._renderGeneration;
+
     if (Map._graphInstance) {
       Map._graphInstance.destroy();
       Map._graphInstance = null;
@@ -92,12 +167,28 @@ window.Widgets.Map = window.Widgets.Map || {};
 
     Map.showEmpty(false);
 
+    Map.whenVizStageReady(() => {
+      if (generation !== Map._renderGeneration) {
+        return;
+      }
+      try {
+        Map._mountGraph(nodes, links);
+      } catch (err) {
+        console.error('Map.renderGraph failed', err);
+        Map.showEmpty(true);
+        Map.setStatus(`Graph render failed: ${err.message}`);
+      }
+    });
+  };
+
+  Map._mountGraph = function (nodes, links) {
     Map._graphInstance = Viz.ForceGraph.create({
       svg: '#graph',
       tooltip: '#tooltip',
       nodes,
       links,
       variant: Map._variant,
+      nodeDisplay: Map._nodeDisplay,
       onNodeClick: (event, node) => {
         Events.raiseEvent(
           'map-node-selected',
@@ -147,6 +238,15 @@ window.Widgets.Map = window.Widgets.Map || {};
     }
   };
 
+  Map.setNodeDisplay = function (mode) {
+    if (mode !== 'circles' && mode !== 'icons') return;
+    Map._nodeDisplay = mode;
+    Map.setNodeDisplayButtons(mode);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
   Map.onConnectionChange = function (connected, status) {
     Map._connected = connected;
     Map.setControlsEnabled(connected);
@@ -179,7 +279,12 @@ window.Widgets.Map = window.Widgets.Map || {};
       btn.addEventListener('click', () => Map.setVariant(btn.dataset.variant));
     });
 
+    el.querySelectorAll('#map-node-display-buttons [data-node-display]').forEach((btn) => {
+      btn.addEventListener('click', () => Map.setNodeDisplay(btn.dataset.nodeDisplay));
+    });
+
     Map.setVariantButtons(Map._variant);
+    Map.setNodeDisplayButtons(Map._nodeDisplay);
     Map.setControlsEnabled(Connection.isConnected());
     Map.showEmpty(true);
 

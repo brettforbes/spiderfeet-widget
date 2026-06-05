@@ -27,13 +27,11 @@ npm run build
 
 Output: `dist/index.html`, `dist/widget.js`, `dist/widget.css`, vendor bundles.
 
-## Branding (provisional)
+## Branding
 
-Same operator-supplied stacked mark as the backend repo (replace when firm/final artwork arrives):
+![SpiderFeet logo — horizontal, dark](.docs/branding/spiderfeet_logo_horizontal_dark.svg)
 
-![SpiderFeet provisional logo](.docs/branding/spiderfeet-light-stacked.png)
-
-Navbar: `src/assets/logos/spiderfeet-light-stacked.png` — see [.docs/branding/README.md](.docs/branding/README.md).
+Navbar: `src/assets/logos/spiderfeet_logo_horizontal_dark.svg` — see [.docs/branding/README.md](.docs/branding/README.md).
 
 ## Where to add code
 

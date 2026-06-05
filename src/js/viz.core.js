@@ -24,9 +24,12 @@
         typeof svgElement === 'string'
           ? document.querySelector(svgElement)
           : svgElement;
-      const rect = el.getBoundingClientRect();
-      const width = options.width ?? (rect.width || 800);
-      const height = options.height ?? (rect.height || 500);
+      const stage = el?.closest('#viz-stage') || el?.parentElement || el;
+      const rect = stage.getBoundingClientRect();
+      const measuredW = rect.width > 0 ? rect.width : 0;
+      const measuredH = rect.height > 0 ? rect.height : 0;
+      const width = options.width ?? (measuredW || 800);
+      const height = options.height ?? (measuredH || 500);
       const margin = {
         top: 20,
         right: 30,

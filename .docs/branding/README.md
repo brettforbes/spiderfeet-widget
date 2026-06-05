@@ -1,7 +1,5 @@
 # SpiderFeet branding assets (widget)
 
-Canonical provisional mark: [`spiderfeet-light-stacked.png`](spiderfeet-light-stacked.png) (operator-supplied; replace when firm/final artwork arrives).
+Canonical mark: [`spiderfeet_logo_horizontal_dark.svg`](spiderfeet_logo_horizontal_dark.svg) — horizontal wordmark for dark navbar and README.
 
-Built copy: `src/assets/logos/spiderfeet-light-stacked.png` → `dist/logos/` via webpack.
-
-Do not add generated logo concepts; use this asset only.
+Built copy: `src/assets/logos/spiderfeet_logo_horizontal_dark.svg` → `dist/logos/` via webpack.

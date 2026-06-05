@@ -27,7 +27,7 @@
         .force('link', d3.forceLink().id((d) => d.id).distance(35).strength(0.9))
         .force('charge', d3.forceManyBody().strength(-400))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collide', d3.forceCollide().radius((d) => (d.r || 8) + 4));
+        .force('collide', d3.forceCollide().radius((d) => nodeCollisionRadius(d) + 4));
     },
 
     grouped(simulation, width, height, nodes) {
@@ -51,6 +51,13 @@
         .force('y', d3.forceY((d) => centres.get(d.group).y).strength(0.12));
     },
   };
+
+  function nodeCollisionRadius(d) {
+    if (d.nodeDisplay === 'icons') {
+      return d.iconSize ? d.iconSize / 2 : 18;
+    }
+    return d.r || 8;
+  }
 
   function dragBehaviour(simulation) {
     return d3
@@ -98,6 +105,48 @@
     return l.role === 'consumed' ? '4 3' : null;
   }
 
+  function appendNodeShape(nodeSel, colour, nodeDisplay) {
+    nodeSel.each(function (d) {
+      const group = d3.select(this);
+      group.selectAll('circle, image').remove();
+
+      if (nodeDisplay === 'icons' && d.iconUrl) {
+        const size = d.iconSize || 28;
+        const hitR = size / 2;
+        group
+          .append('circle')
+          .attr('class', 'node-hit')
+          .attr('r', hitR)
+          .attr('fill', 'rgba(0,0,0,0.001)')
+          .attr('stroke', 'none');
+        const image = group
+          .append('image')
+          .attr('class', 'node-icon')
+          .attr('href', d.iconUrl)
+          .attr('width', size)
+          .attr('height', size)
+          .attr('x', -size / 2)
+          .attr('y', -size / 2)
+          .attr('pointer-events', 'none');
+        if (d.iconFallbackUrl) {
+          image.on('error', function () {
+            const el = d3.select(this);
+            if (el.attr('href') !== d.iconFallbackUrl) {
+              el.attr('href', d.iconFallbackUrl);
+            }
+          });
+        }
+        return;
+      }
+
+      group
+        .append('circle')
+        .attr('class', 'node-circle node-hit')
+        .attr('r', d.r || 8)
+        .attr('fill', nodeFill(d, colour));
+    });
+  }
+
   const ForceGraph = {
     variants: Object.keys(VARIANTS),
 
@@ -108,6 +157,7 @@
         nodes: rawNodes,
         links: rawLinks,
         variant = 'default',
+        nodeDisplay = 'circles',
         onNodeClick,
         onNodeHover,
       } = options;
@@ -116,9 +166,16 @@
       const { width, height } = Core.dimensions(svgEl);
       const svg = Core.selectSvg(svgEl);
       Core.clear(svg);
-      svg.attr('width', width).attr('height', height);
+      svg
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('preserveAspectRatio', 'xMidYMid meet');
 
       const { nodes, links } = Core.cloneGraph({ nodes: rawNodes, links: rawLinks });
+      nodes.forEach((n) => {
+        n.nodeDisplay = nodeDisplay;
+      });
       const groups = [...new Set(nodes.map((n) => n.group))];
       const colour = Core.colourByGroup(groups);
 
@@ -148,13 +205,13 @@
       const node = rootG
         .append('g')
         .attr('class', 'nodes')
-        .selectAll('circle')
+        .selectAll('g')
         .data(nodes)
-        .join('circle')
+        .join('g')
         .attr('class', (d) => `node node-${d.group}`)
-        .attr('r', (d) => d.r || 8)
-        .attr('fill', (d) => nodeFill(d, colour))
         .call(dragBehaviour(simulation));
+
+      appendNodeShape(node, colour, nodeDisplay);
 
       const tooltipEl = tooltipSelector
         ? document.querySelector(tooltipSelector)
@@ -206,12 +263,12 @@
           .attr('y1', (d) => d.source.y)
           .attr('x2', (d) => d.target.x)
           .attr('y2', (d) => d.target.y);
-        node.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
+        node.attr('transform', (d) => `translate(${d.x},${d.y})`);
       });
 
       const disconnectResize = Core.observeResize(svgEl.parentElement, () => {
         const dims = Core.dimensions(svgEl);
-        svg.attr('width', dims.width).attr('height', dims.height);
+        svg.attr('viewBox', `0 0 ${dims.width} ${dims.height}`);
         simulation.force('center', d3.forceCenter(dims.width / 2, dims.height / 2));
         simulation.alpha(0.3).restart();
       });
