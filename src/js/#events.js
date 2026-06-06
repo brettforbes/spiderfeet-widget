@@ -1,11 +1,18 @@
-window.Widgets.Events = {};
+window.Widgets = window.Widgets || {};
+window.Widgets.Events = window.Widgets.Events || {};
 
 //define your function
 (function($, ns) {
 
     //only works on same origin
     //listen for broadcast messages on dedicated channel
-    ns.broadcastChannel = new BroadcastChannel('widget:embed');
+    try {
+        if (typeof BroadcastChannel !== 'undefined') {
+            ns.broadcastChannel = new BroadcastChannel('widget:embed');
+        }
+    } catch (err) {
+        console.warn('BroadcastChannel unavailable', err);
+    }
 
     //only works on same origin
     ns.broadcastListener = function(callback) {

@@ -88,7 +88,9 @@ window.Widgets = {};
         if (document.readyState !== "loading") {
             ns.onDocumentReady(selector, callbackFn);
         } else {
-            document.addEventListener("DOMContentLoaded", ns.onDocumentReady(selector, callbackFn));
+            document.addEventListener("DOMContentLoaded", function () {
+                ns.onDocumentReady(selector, callbackFn);
+            });
         }
     }
 

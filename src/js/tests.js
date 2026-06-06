@@ -6,7 +6,113 @@ window.Widgets.Tests = window.Widgets.Tests || {};
 
   Tests.selectorPanel = '[data-widget="tests-panel"]';
   Tests._modulesLoaded = false;
-  Tests._expandedModule = null;
+  Tests._moduleList = [];
+  Tests._planItems = [];
+  Tests._runAllActive = false;
+  Tests._runAllCancel = false;
+  Tests._runningRoute = null;
+  Tests._progress = { global: { done: 0, total: 0 }, modules: {} };
+  Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+
+  Tests.getTimeoutSeconds = function () {
+    const el = document.getElementById('tests-timeout');
+    const value = parseInt(el?.value ?? '120', 10);
+    return Number.isFinite(value) ? value : 120;
+  };
+
+  Tests.fetchTimeoutMs = function () {
+    return Tests.getTimeoutSeconds() * 1000 + 10000;
+  };
+
+  Tests.initProgressState = function (modules) {
+    const totals = {};
+    let globalTotal = 0;
+    (modules || []).forEach((mod) => {
+      const total = mod.test_count || 0;
+      totals[mod.module_id] = { done: 0, total };
+      globalTotal += total;
+    });
+    Tests._progress = {
+      global: { done: 0, total: globalTotal },
+      modules: totals,
+    };
+  };
+
+  Tests.setProgressBar = function (barEl, done, total, animate) {
+    if (!barEl) return;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    barEl.style.width = `${pct}%`;
+    barEl.setAttribute('aria-valuenow', String(pct));
+    barEl.classList.toggle('progress-bar-animated', Boolean(animate));
+    barEl.classList.toggle('progress-bar-striped', Boolean(animate));
+  };
+
+  Tests.updateGlobalProgressUI = function (animate) {
+    const wrap = document.getElementById('tests-global-progress-wrap');
+    const bar = document.getElementById('tests-global-progress-bar');
+    const count = document.getElementById('tests-global-progress-count');
+    const { done, total } = Tests._progress.global;
+    if (wrap) wrap.classList.toggle('d-none', total === 0 && !Tests._runAllActive);
+    if (count) count.textContent = `${done} / ${total}`;
+    Tests.setProgressBar(bar, done, total, animate);
+  };
+
+  Tests.updateModuleProgressUI = function (moduleId, animate) {
+    const state = Tests._progress.modules[moduleId] || { done: 0, total: 0 };
+    const sidebar = document.querySelector(`[data-sidebar-progress="${moduleId}"]`);
+    if (sidebar) {
+      const bar = sidebar.querySelector('[data-sidebar-progress-bar]');
+      const label = sidebar.querySelector('[data-sidebar-progress-count]');
+      if (label) label.textContent = `${state.done} / ${state.total}`;
+      Tests.setProgressBar(bar, state.done, state.total, animate && Tests._runAllActive);
+    }
+    const accordionBar = document.querySelector(
+      `[data-module-toolbar="${moduleId}"] [data-module-progress-bar]`
+    );
+    const accordionLabel = document.querySelector(
+      `[data-module-toolbar="${moduleId}"] [data-module-progress-label]`
+    );
+    if (accordionLabel) {
+      accordionLabel.textContent =
+        state.total > 0 ? `${state.done} / ${state.total} tests` : '';
+    }
+    Tests.setProgressBar(accordionBar, state.done, state.total, animate);
+  };
+
+  Tests.renderSidebarProgressList = function (modules) {
+    const root = document.getElementById('tests-module-progress-list');
+    if (!root) return;
+    root.innerHTML = (modules || [])
+      .map(
+        (mod) => `
+      <div class="tests-sidebar-module-progress mb-2" data-sidebar-progress="${mod.module_id}">
+        <div class="d-flex justify-content-between small text-body-secondary mb-1">
+          <span class="text-truncate me-2" title="${Tests.escapeHtml(mod.name || mod.module_id)}">${mod.module_id}</span>
+          <span data-sidebar-progress-count>0 / ${mod.test_count ?? 0}</span>
+        </div>
+        <div class="progress tests-progress-module" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar" data-sidebar-progress-bar style="width:0%"></div>
+        </div>
+      </div>`
+      )
+      .join('');
+  };
+
+  Tests.moduleToolbarHtml = function (moduleId) {
+    return `
+      <div class="tests-module-toolbar px-3 pt-3 pb-2 border-bottom" data-module-toolbar="${moduleId}">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <button type="button" class="btn btn-sm btn-outline-primary"
+            data-action="run-module-all" data-module-id="${moduleId}">
+            Run all tests
+          </button>
+          <span class="small text-body-secondary" data-module-progress-label></span>
+        </div>
+        <div class="progress tests-progress-accordion" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar" data-module-progress-bar style="width:0%"></div>
+        </div>
+      </div>`;
+  };
 
   Tests.setStatus = function (message) {
     const el = document.getElementById('tests-status-text');
@@ -25,20 +131,84 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     return map[state] || 'text-bg-secondary';
   };
 
+  Tests.formatDuration = function (seconds) {
+    if (seconds == null || Number.isNaN(seconds)) return '—';
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  };
+
+  Tests.setSummaryField = function (root, name, value, fallbackName) {
+    const el =
+      root.querySelector(`[data-count="${name}"]`) ||
+      (fallbackName ? root.querySelector(`[data-count="${fallbackName}"]`) : null);
+    if (el) {
+      el.textContent = value;
+    }
+  };
+
   Tests.renderSummary = function (summary) {
     const root = document.getElementById('tests-summary');
     if (!root || !summary) return;
-    root.querySelector('[data-count="modules"]').textContent = summary.module_count;
-    root.querySelector('[data-count="routes"]').textContent = summary.route_count;
-    root.querySelector('[data-count="groups"]').textContent = summary.consumption_group_count;
-    root.querySelector('[data-count="not-started"]').textContent =
-      summary.route_states?.not_started ?? '—';
-    root.querySelector('[data-count="in-test"]').textContent =
-      summary.route_states?.in_test ?? '—';
-    root.querySelector('[data-count="tested"]').textContent =
-      (summary.route_states?.favourite ?? 0) +
-      (summary.route_states?.unique ?? 0) +
-      (summary.route_states?.error ?? 0);
+    const states = summary.test_states || summary.route_states || {};
+    Tests.setSummaryField(root, 'modules', summary.module_count);
+    Tests.setSummaryField(root, 'tests', summary.test_count ?? '—', 'routes');
+    Tests.setSummaryField(root, 'groups', summary.consumption_group_count);
+    Tests.setSummaryField(root, 'not-started', states.not_started ?? '—');
+    Tests.setSummaryField(root, 'in-test', states.in_test ?? '—');
+    Tests.setSummaryField(
+      root,
+      'tested',
+      (states.favourite ?? 0) + (states.unique ?? 0) + (states.error ?? 0)
+    );
+    Tests.setSummaryField(root, 'passed', Tests._runStats.passed);
+    Tests.setSummaryField(root, 'failed', Tests._runStats.failed);
+    Tests.setSummaryField(root, 'skipped', Tests._runStats.skipped);
+  };
+
+  Tests.resetRunStats = function () {
+    Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+    Tests.renderSummary({ test_states: {}, route_states: {} });
+  };
+
+  Tests.updateRunStatsUI = function () {
+    const root = document.getElementById('tests-summary');
+    if (!root) return;
+    Tests.setSummaryField(root, 'passed', Tests._runStats.passed);
+    Tests.setSummaryField(root, 'failed', Tests._runStats.failed);
+    Tests.setSummaryField(root, 'skipped', Tests._runStats.skipped);
+  };
+
+  Tests.moduleSubscriptionMeta = function (mod) {
+    const metaItems = Tests._planItems.filter((row) => row.module_id === mod.module_id);
+    const row = metaItems[0];
+    const tier = row?.subscription_tier || mod.subscription_tier || 'none';
+    const requiresKey = row ? Boolean(row.requires_api_key) : Boolean(mod.requires_api_key);
+    const hasKey = row ? row.has_api_key !== false : mod.has_api_key !== false;
+    return { tier, requiresKey, hasKey, missingKey: requiresKey && !hasKey };
+  };
+
+  Tests.isModuleVisible = function (mod) {
+    const meta = Tests.moduleSubscriptionMeta(mod);
+    return !meta.requiresKey || meta.hasKey;
+  };
+
+  Tests.visibleModules = function (modules) {
+    return (modules || []).filter((mod) => Tests.isModuleVisible(mod));
+  };
+
+  Tests.subscriptionTierBadgeHtml = function (tier, missingKey) {
+    if (tier === 'none') {
+      return '<span class="badge text-bg-success me-2" title="No API key required">open</span>';
+    }
+    if (tier === 'paid_auth') {
+      const cls = missingKey ? 'text-bg-warning' : 'text-bg-info';
+      return `<span class="badge ${cls} me-2" title="Paid subscription">paid</span>`;
+    }
+    if (tier === 'free_auth') {
+      const cls = missingKey ? 'text-bg-warning' : 'text-bg-secondary';
+      return `<span class="badge ${cls} me-2" title="Free signup / API key">free</span>`;
+    }
+    return '';
   };
 
   Tests.renderModuleAccordion = function (modules) {
@@ -46,7 +216,9 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     if (!root) return;
     root.innerHTML = '';
 
-    modules.forEach((mod, index) => {
+    const visible = Tests.visibleModules(modules);
+    visible.forEach((mod) => {
+      const { tier, missingKey } = Tests.moduleSubscriptionMeta(mod);
       const itemId = `tests-mod-${mod.module_id.replace(/[^a-z0-9_-]/gi, '-')}`;
       const item = document.createElement('div');
       item.className = 'accordion-item';
@@ -58,10 +230,11 @@ window.Widgets.Tests = window.Widgets.Tests || {};
             data-module-id="${mod.module_id}">
             <span class="me-2 fw-semibold">${mod.module_id}</span>
             <span class="text-body-secondary small me-2">${mod.name}</span>
-            <span class="badge text-bg-light border ms-auto me-2">${mod.route_count} routes</span>
+            ${Tests.subscriptionTierBadgeHtml(tier, missingKey)}
+            <span class="badge text-bg-light border ms-auto me-2">${mod.test_count ?? '—'} tests</span>
             ${
-              mod.routes_tested
-                ? `<span class="badge text-bg-success">${mod.routes_tested} tested</span>`
+              (mod.tests_run ?? mod.routes_tested)
+                ? `<span class="badge text-bg-success">${mod.tests_run ?? mod.routes_tested} run</span>`
                 : ''
             }
           </button>
@@ -69,31 +242,70 @@ window.Widgets.Tests = window.Widgets.Tests || {};
         <div id="${itemId}-body" class="accordion-collapse collapse"
           aria-labelledby="${itemId}-head" data-bs-parent="#tests-module-accordion">
           <div class="accordion-body p-0" data-module-body="${mod.module_id}">
-            <div class="p-3 text-body-secondary small">Loading routes…</div>
+            ${Tests.moduleToolbarHtml(mod.module_id)}
+            <div data-module-content="${mod.module_id}">
+              <div class="p-3 text-body-secondary small">Expand to load tests…</div>
+            </div>
           </div>
         </div>`;
       root.appendChild(item);
 
+      item.querySelector('[data-action="run-module-all"]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        Tests.runModuleAll(mod.module_id);
+      });
+
       item.querySelector('.accordion-collapse').addEventListener('show.bs.collapse', () => {
-        Tests.loadModuleRoutes(mod.module_id);
+        Tests.loadModuleTests(mod.module_id);
       });
     });
+
+    Tests.initProgressState(visible);
+    Tests.renderSidebarProgressList(visible);
+    Tests.updateGlobalProgressUI(false);
+    visible.forEach((mod) => Tests.updateModuleProgressUI(mod.module_id, false));
+
+    Tests.scheduleScrollSync();
   };
 
-  Tests.renderRoutesTable = function (container, detail) {
-    const rows = (detail.routes || [])
-      .map(
-        (route) => `
-      <tr>
-        <td class="small font-monospace">${route.consumed_nugget_id}</td>
-        <td class="small font-monospace">${route.produced_nugget_id}</td>
-        <td><span class="badge ${Tests.stateBadgeClass(route.route_state)}">${route.route_state}</span></td>
-        <td class="text-end">
-          <button type="button" class="btn btn-sm btn-outline-primary" disabled
-            title="Route execution — Stage 4c">Run</button>
+  Tests.testRowId = function (moduleId, consumedId) {
+    return `${moduleId}::${consumedId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  };
+
+  Tests.renderTestsTable = function (container, detail) {
+    const connected = Connection.isConnected();
+    const rows = (detail.tests || [])
+      .map((test) => {
+        const rowId = Tests.testRowId(detail.module_id, test.consumed_nugget_id);
+        const inputValue = test.input_value || '';
+        const hasInput = Boolean(inputValue);
+        const runTitle = hasInput
+          ? `Run with input ${inputValue}`
+          : 'No default input — enter value when prompted';
+        return `
+      <tr data-test-row="${rowId}">
+        <td class="small font-monospace">${test.consumed_nugget_id}</td>
+        <td class="small font-monospace">${hasInput ? Tests.escapeHtml(inputValue) : '<span class="text-body-secondary">—</span>'}</td>
+        <td>
+          <span class="badge ${Tests.stateBadgeClass(test.test_state)}" data-test-state>${test.test_state}</span>
         </td>
-      </tr>`
-      )
+        <td class="text-end">
+          <button type="button" class="btn btn-sm btn-outline-primary"
+            data-action="run-test"
+            data-module-id="${detail.module_id}"
+            data-consumed="${test.consumed_nugget_id}"
+            data-input="${Tests.escapeHtml(inputValue)}"
+            title="${runTitle}"
+            ${connected ? '' : 'disabled'}>
+            Run
+          </button>
+        </td>
+      </tr>
+      <tr class="d-none" data-test-result="${rowId}">
+        <td colspan="4" class="small bg-body-tertiary border-top-0 pt-0 pb-2 px-3"></td>
+      </tr>`;
+      })
       .join('');
 
     container.innerHTML = `
@@ -103,7 +315,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
           <thead class="table-light">
             <tr>
               <th>Consumed</th>
-              <th>Produced</th>
+              <th>Input value</th>
               <th>State</th>
               <th class="text-end">Action</th>
             </tr>
@@ -111,18 +323,523 @@ window.Widgets.Tests = window.Widgets.Tests || {};
           <tbody>${rows}</tbody>
         </table>
       </div>`;
+
+    container.querySelectorAll('[data-action="run-test"]').forEach((btn) => {
+      btn.addEventListener('click', () => Tests.runTest(btn));
+    });
   };
 
-  Tests.loadModuleRoutes = async function (moduleId) {
-    const body = document.querySelector(`[data-module-body="${moduleId}"]`);
-    if (!body || body.dataset.loaded === 'true') return;
+  Tests.resolveTarget = function (consumedId, sampleFromRoute, options) {
+    const opts = options || {};
+    if (sampleFromRoute) return sampleFromRoute;
+    const fallback = Tests._nuggetSamples?.[consumedId];
+    if (fallback) return fallback;
+    if (opts.skipPrompt) return null;
+    const manual = window.prompt(
+      `Enter a SpiderFeet target value for consumed nugget ${consumedId}:`
+    );
+    return manual ? manual.trim() : null;
+  };
+
+  Tests.renderScanResultHtml = function (body) {
+    const record = body.scan_record || {};
+    const produced = body.produced || [];
+    const producedTypes = [...new Set(produced.map((n) => n.nugget_id))];
+    const status = record.status || record.scan_status || 'UNKNOWN';
+    const duration = Tests.formatDuration(record.scan_duration);
+    const eventCount = record.scan_event_count ?? record.scan_results?.event_count ?? 0;
+    const discovered =
+      producedTypes.length > 0
+        ? `Discovered: ${producedTypes.join(', ')}`
+        : 'No produced nuggets yet';
+    let reason = '';
+    if (status !== 'FINISHED') {
+      reason = `status-${String(status).toLowerCase()}`;
+    } else if (produced.length === 0) {
+      reason = 'no-produced-objects';
+    }
+    const noOutputReasonLabel =
+      reason === 'no-produced-objects'
+        ? 'No output objects returned'
+        : reason.startsWith('status-')
+          ? `Scan status ${status}`
+          : '';
+    const tone = status === 'FINISHED' && produced.length > 0 ? 'success-subtle' : 'danger-subtle';
+
+    return {
+      status,
+      producedCount: produced.length,
+      discoveredLabel: discovered,
+      reason,
+      html: `<div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+          <span class="badge text-bg-${status === 'FINISHED' && produced.length > 0 ? 'success' : 'danger'}">${status}</span>
+          <span class="text-body-secondary">${duration} · ${eventCount} events · ${produced.length} produced</span>
+          <span class="badge text-bg-info">${Tests.escapeHtml(discovered)}</span>
+          ${
+            noOutputReasonLabel
+              ? `<span class="badge text-bg-danger">${Tests.escapeHtml(noOutputReasonLabel)}</span>`
+              : ''
+          }
+        </div>
+        <details class="mb-0">
+          <summary class="text-primary" style="cursor:pointer">Scan record</summary>
+          <pre class="small mb-0 mt-1 p-2 bg-body border rounded" style="max-height:12rem;overflow:auto">${Tests.escapeHtml(JSON.stringify(body, null, 2))}</pre>
+        </details>`,
+      tone,
+    };
+  };
+
+  Tests.executeTest = async function ({ moduleId, consumedId, inputValue }) {
+    const rowId = Tests.testRowId(moduleId, consumedId);
+
+    const nuggetData = Tests.resolveTarget(consumedId, inputValue || '', { skipPrompt: true });
+    if (!nuggetData) {
+      return { ok: false, skipped: true, rowId, reason: 'no input value' };
+    }
+
+    Tests._runningRoute = rowId;
+    const resultRow = document.querySelector(`[data-test-result="${rowId}"]`);
+    resultRow?.classList.add('d-none');
+
+    const runButton = document.querySelector(
+      `[data-test-row="${rowId}"] [data-action="run-test"]`
+    );
+    const originalLabel = runButton?.textContent;
+    if (runButton) {
+      runButton.disabled = true;
+      runButton.textContent = 'Running…';
+    }
+
+    try {
+      // scan_ui (/api/v1/scan_ui) returns produced nuggets + scan record when wait=true.
+      // Do not use POST /scans — that only starts a scan and does not return results.
+      const body = await Connection.fetchJson('/scan_ui', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          module_id: moduleId,
+          consumed: {
+            nugget_id: consumedId,
+            nugget_data: nuggetData,
+          },
+          wait: true,
+          timeout_seconds: Tests.getTimeoutSeconds(),
+        }),
+        timeoutMs: Tests.fetchTimeoutMs(),
+      });
+
+      const parsed = Tests.renderScanResultHtml(body);
+      if (parsed.status === 'FINISHED' && parsed.producedCount > 0) {
+        Tests.updateTestStateBadge(rowId, 'in-test');
+      } else {
+        Tests.updateTestStateBadge(rowId, 'error');
+      }
+      Tests.showTestResult(rowId, parsed.html, parsed.tone);
+
+      return {
+        ok: parsed.status === 'FINISHED' && parsed.producedCount > 0,
+        rowId,
+        status: parsed.status,
+        producedCount: parsed.producedCount,
+        discoveredLabel: parsed.discoveredLabel,
+        reason: parsed.reason,
+      };
+    } catch (err) {
+      Tests.showTestResult(
+        rowId,
+        `<span class="text-danger">Run failed: ${Tests.escapeHtml(err.message)}</span>`,
+        'danger-subtle'
+      );
+      return { ok: false, rowId, error: err.message };
+    } finally {
+      Tests._runningRoute = null;
+      if (runButton) {
+        runButton.disabled = !Connection.isConnected() || Tests._runAllActive;
+        runButton.textContent = originalLabel || 'Run';
+      }
+    }
+  };
+
+  Tests.runTest = async function (button) {
+    if (Tests._runningRoute || Tests._runAllActive) return;
+
+    const moduleId = button.dataset.moduleId;
+    const consumedId = button.dataset.consumed;
+    const inputValue = button.dataset.input || '';
+
+    const nuggetData = Tests.resolveTarget(consumedId, inputValue);
+    if (!nuggetData) return;
+
+    Tests.setStatus(`Running ${moduleId} · ${consumedId} with ${nuggetData}…`);
+
+    const outcome = await Tests.executeTest({
+      moduleId,
+      consumedId,
+      inputValue: nuggetData,
+    });
+
+    if (outcome.skipped) return;
+    if (outcome.ok) {
+      Tests.setStatus(
+        `${moduleId} · ${consumedId}: ${outcome.status} — ${outcome.discoveredLabel}`
+      );
+    } else {
+      const reason = outcome.error || outcome.reason || outcome.status;
+      Tests.setStatus(`Run failed: ${reason}`);
+    }
+  };
+
+  Tests.setBatchControls = function (running, options) {
+    const showGlobal = Boolean((options || {}).showGlobalProgress);
+    Tests._runAllActive = running;
+    document.getElementById('tests-run-all')?.classList.toggle('d-none', running);
+    document.getElementById('tests-run-all-stop')?.classList.toggle('d-none', !running);
+    document.getElementById('tests-global-progress-wrap')?.classList.toggle(
+      'd-none',
+      !running || !showGlobal
+    );
+    Tests.setActionButtonsEnabled(Connection.isConnected());
+  };
+
+  Tests.planPath = function (query) {
+    return query
+      ? `/tests/plan?search=${encodeURIComponent(query)}&limit=200`
+      : '/tests/plan?limit=200&offset=0';
+  };
+
+  Tests.fetchTestPlan = async function (query) {
+    const plan = await Connection.fetchJson(Tests.planPath(query));
+    Tests._planItems = plan.items || [];
+    return plan;
+  };
+
+  Tests.planToQueue = function (moduleId) {
+    const items = moduleId
+      ? Tests._planItems.filter((row) => row.module_id === moduleId)
+      : Tests._planItems;
+    return items.map((row) => ({
+      moduleId: row.module_id,
+      consumedId: row.consumed_nugget_id,
+      inputValue: row.input_value || Tests._nuggetSamples?.[row.consumed_nugget_id] || '',
+      requiresApiKey: Boolean(row.requires_api_key),
+      hasApiKey: row.has_api_key !== false,
+      skipReason: row.skip_reason || null,
+    }));
+  };
+
+  Tests.runnablePlanSummary = function (moduleId) {
+    const { runnable, skipped } = Tests.filterRunnable(Tests.planToQueue(moduleId));
+    return { runnable, skipped, total: runnable.length + skipped };
+  };
+
+  Tests.setRunningModuleHighlight = function (moduleId) {
+    document.querySelectorAll('#tests-module-accordion .accordion-item').forEach((item) => {
+      const btn = item.querySelector('.accordion-button[data-module-id]');
+      const active = moduleId && btn?.dataset.moduleId === moduleId;
+      item.classList.toggle('tests-module-running', Boolean(active));
+    });
+  };
+
+  Tests.finishBatchEarly = function (message) {
+    Tests.setRunningModuleHighlight(null);
+    Tests.setBatchControls(false);
+    if (message) Tests.setStatus(message);
+  };
+
+  Tests.filterRunnable = function (queue) {
+    let skippedNoInput = 0;
+    let skippedMissingKey = 0;
+    const runnable = queue.filter((item) => {
+      if (item.skipReason === 'missing-api-key') {
+        skippedMissingKey += 1;
+        return false;
+      }
+      if (!Boolean(item.inputValue || Tests._nuggetSamples?.[item.consumedId])) {
+        skippedNoInput += 1;
+        return false;
+      }
+      return true;
+    });
+    return {
+      runnable,
+      skipped: skippedNoInput + skippedMissingKey,
+      skippedNoInput,
+      skippedMissingKey,
+    };
+  };
+
+  Tests.resetBatchProgress = function (runnable, resetGlobal) {
+    const touched = new Set(runnable.map((item) => item.moduleId));
+    touched.forEach((moduleId) => {
+      const total = runnable.filter((item) => item.moduleId === moduleId).length;
+      Tests._progress.modules[moduleId] = { done: 0, total };
+      Tests.updateModuleProgressUI(moduleId, true);
+    });
+    if (resetGlobal) {
+      Tests._progress.global = { done: 0, total: runnable.length };
+      Tests.updateGlobalProgressUI(true);
+    }
+  };
+
+  Tests.recordBatchOutcome = function (item, outcome, trackGlobal) {
+    if (outcome.skipped) {
+      Tests._runStats.skipped += 1;
+      if (outcome.reason === 'missing-api-key') {
+        Tests._runStats.keySkipped += 1;
+      }
+      Tests.updateRunStatsUI();
+      return { passed: 0, failed: 0, skipped: 1 };
+    }
+    const mod = Tests._progress.modules[item.moduleId];
+    if (mod) {
+      mod.done += 1;
+      Tests.updateModuleProgressUI(item.moduleId, true);
+    }
+    if (trackGlobal) {
+      Tests._progress.global.done += 1;
+      Tests.updateGlobalProgressUI(true);
+    }
+    if (outcome.ok) {
+      Tests._runStats.passed += 1;
+    } else {
+      Tests._runStats.failed += 1;
+    }
+    Tests.updateRunStatsUI();
+    return outcome.ok ? { passed: 1, failed: 0, skipped: 0 } : { passed: 0, failed: 1, skipped: 0 };
+  };
+
+  Tests.runBatch = async function (runnable, options) {
+    const trackGlobal = Boolean(options.trackGlobal);
+    const label = options.label || 'Batch';
+    const skipped = options.skipped || 0;
+    const controlsActive = Boolean(options.controlsAlreadyActive);
+    const preSkipped = options.preSkipped || 0;
+    const preKeySkipped = options.preKeySkipped || 0;
+
+    if (!controlsActive) {
+      Tests._runAllCancel = false;
+      Tests.setBatchControls(true, { showGlobalProgress: trackGlobal });
+    }
+    Tests._runStats = { passed: 0, failed: 0, skipped: preSkipped, keySkipped: preKeySkipped };
+    Tests.updateRunStatsUI();
+    Tests.resetBatchProgress(runnable, trackGlobal);
+
+    let done = 0;
+    let passed = 0;
+    let failed = 0;
+
+    for (const item of runnable) {
+      if (Tests._runAllCancel) break;
+
+      done += 1;
+      Tests.setStatus(`${label} ${done}/${runnable.length}: ${item.moduleId} · ${item.consumedId}…`);
+
+      await Tests.loadModuleTests(item.moduleId);
+      Tests.setRunningModuleHighlight(item.moduleId);
+
+      const outcome = await Tests.executeTest(item);
+      const tallies = Tests.recordBatchOutcome(item, outcome, trackGlobal);
+      passed += tallies.passed;
+      failed += tallies.failed;
+    }
+
+    Tests.setRunningModuleHighlight(null);
+    Tests.setBatchControls(false);
+    Tests.updateGlobalProgressUI(false);
+    Object.keys(Tests._progress.modules).forEach((moduleId) => {
+      Tests.updateModuleProgressUI(moduleId, false);
+    });
+
+    if (Tests._runAllCancel) {
+      Tests.setStatus(
+        `${label} stopped at ${done}/${runnable.length} — ${passed} finished, ${failed} failed`
+      );
+    } else {
+      Tests.setStatus(
+        `${label} complete — ${passed} passed, ${failed} failed` +
+          (skipped ? `, ${skipped} skipped` : '')
+      );
+    }
+  };
+
+  Tests.runAllTests = async function () {
+    if (Tests._runAllActive || Tests._runningRoute || !Tests._moduleList.length) return;
+
+    if (!Tests._planItems.length) {
+      Tests.setStatus('Loading test plan…');
+      try {
+        await Tests.fetchTestPlan();
+      } catch (err) {
+        Tests.setStatus(`Could not load test plan: ${err.message}`);
+        return;
+      }
+    }
+
+    const { runnable, skipped, skippedMissingKey, skippedNoInput } = Tests.runnablePlanSummary();
+    if (!runnable.length) {
+      Tests.setStatus('No tests with input values to run.');
+      return;
+    }
+
+    const timeout = Tests.getTimeoutSeconds();
+    const label =
+      skipped > 0
+        ? `${runnable.length} tests (${skipped} skipped)`
+        : `${runnable.length} tests`;
+    if (
+      !window.confirm(
+        `Run ${label} in ${Tests.visibleModules(Tests._moduleList).length} modules sequentially?\n\n` +
+          `Uses scan_ui API. Timeout: ${timeout}s per test.\n` +
+          `${skippedMissingKey ? `Missing API key: ${skippedMissingKey}\n` : ''}` +
+          `${skippedNoInput ? `No input sample: ${skippedNoInput}` : ''}`
+      )
+    ) {
+      return;
+    }
+
+    Tests._runAllCancel = false;
+    Tests.setBatchControls(true, { showGlobalProgress: true });
+
+    await Tests.runBatch(runnable, {
+      trackGlobal: true,
+      label: 'Overall batch',
+      skipped,
+      preSkipped: skipped,
+      preKeySkipped: skippedMissingKey,
+      controlsAlreadyActive: true,
+    });
+  };
+
+  Tests.runModuleAll = async function (moduleId) {
+    if (Tests._runAllActive || Tests._runningRoute) return;
+
+    if (!Tests._planItems.length) {
+      try {
+        await Tests.fetchTestPlan();
+      } catch (err) {
+        Tests.setStatus(`Could not load test plan: ${err.message}`);
+        return;
+      }
+    }
+
+    const { runnable, skipped, skippedMissingKey, skippedNoInput } = Tests.runnablePlanSummary(moduleId);
+    if (!runnable.length) {
+      Tests.setStatus(`No runnable tests for ${moduleId}.`);
+      return;
+    }
+
+    const timeout = Tests.getTimeoutSeconds();
+    const label =
+      skipped > 0
+        ? `${runnable.length} tests in ${moduleId} (${skipped} skipped)`
+        : `${runnable.length} tests in ${moduleId}`;
+    if (
+      !window.confirm(
+        `Run ${label}?\n\nUses scan_ui API. Timeout: ${timeout}s per test.\n` +
+          `${skippedMissingKey ? `Missing API key: ${skippedMissingKey}\n` : ''}` +
+          `${skippedNoInput ? `No input sample: ${skippedNoInput}` : ''}`
+      )
+    ) {
+      return;
+    }
+    if (skippedMissingKey || skippedNoInput) {
+      Tests.setStatus(
+        `${moduleId}: ${runnable.length} runnable, ${skippedMissingKey} missing key, ${skippedNoInput} missing input`
+      );
+    }
+
+    Tests._runAllCancel = false;
+    Tests.setBatchControls(true, { showGlobalProgress: false });
+
+    await Tests.loadModuleTests(moduleId);
+
+    await Tests.runBatch(runnable, {
+      trackGlobal: false,
+      label: moduleId,
+      skipped,
+      preSkipped: skipped,
+      preKeySkipped: skippedMissingKey,
+      controlsAlreadyActive: true,
+    });
+  };
+
+  Tests.stopRunAll = function () {
+    Tests._runAllCancel = true;
+    if (Tests._runningRoute) {
+      Tests.setStatus('Stopping batch after current test…');
+    } else {
+      Tests.finishBatchEarly('Batch stopped.');
+    }
+  };
+
+  Tests.showTestResult = function (rowId, html, tone) {
+    const row = document.querySelector(`[data-test-result="${rowId}"]`);
+    if (!row) return;
+    const cell = row.querySelector('td');
+    cell.innerHTML = html;
+    cell.className = `small border-top-0 pt-0 pb-2 px-3 bg-${tone || 'body-tertiary'}`;
+    row.classList.remove('d-none');
+  };
+
+  Tests.updateTestStateBadge = function (rowId, state) {
+    const mainRow = document.querySelector(`[data-test-row="${rowId}"]`);
+    const badge = mainRow?.querySelector('[data-test-state]');
+    if (!badge) return;
+    badge.textContent = state;
+    badge.className = `badge ${Tests.stateBadgeClass(state)}`;
+  };
+
+  Tests.escapeHtml = function (value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
+
+  Tests.setRunButtonsEnabled = function (enabled) {
+    document.querySelectorAll('[data-action="run-test"]').forEach((btn) => {
+      btn.disabled = !enabled || Boolean(Tests._runningRoute) || Tests._runAllActive;
+    });
+    document.querySelectorAll('[data-action="run-module-all"]').forEach((btn) => {
+      btn.disabled = !enabled || Boolean(Tests._runningRoute) || Tests._runAllActive;
+    });
+  };
+
+  Tests.setActionButtonsEnabled = function (connected) {
+    const batchRunning = Tests._runAllActive;
+    document.getElementById('tests-search')?.toggleAttribute('disabled', !connected || batchRunning);
+    document.getElementById('tests-refresh')?.toggleAttribute('disabled', !connected || batchRunning);
+    document.getElementById('tests-timeout')?.toggleAttribute('disabled', !connected || batchRunning);
+    document.getElementById('tests-run-all')?.toggleAttribute(
+      'disabled',
+      !connected || batchRunning || !Tests._moduleList.length
+    );
+    Tests.setRunButtonsEnabled(connected && !batchRunning);
+  };
+
+  Tests.loadModuleTests = async function (moduleId) {
+    const content = document.querySelector(`[data-module-content="${moduleId}"]`);
+    if (!content || content.dataset.loaded === 'true') return;
+
+    content.innerHTML = '<div class="p-3 text-body-secondary small">Loading tests…</div>';
 
     try {
       const detail = await Connection.fetchJson(`/tests/modules/${moduleId}`);
-      Tests.renderRoutesTable(body, detail);
-      body.dataset.loaded = 'true';
+      Tests.renderTestsTable(content, detail);
+      content.dataset.loaded = 'true';
+      const total = (detail.tests || []).length;
+      if (Tests._progress.modules[moduleId]) {
+        Tests._progress.modules[moduleId].total = total;
+      }
+      Tests.updateModuleProgressUI(moduleId, false);
+      const sidebar = document.querySelector(`[data-sidebar-progress="${moduleId}"]`);
+      const label = sidebar?.querySelector('[data-sidebar-progress-count]');
+      if (label && Tests._progress.modules[moduleId]) {
+        label.textContent = `${Tests._progress.modules[moduleId].done} / ${total}`;
+      }
     } catch (err) {
-      body.innerHTML = `<div class="p-3 text-danger small">Failed to load routes: ${err.message}</div>`;
+      content.innerHTML = `<div class="p-3 text-danger small">Failed to load tests: ${err.message}</div>`;
     }
   };
 
@@ -132,14 +849,32 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     spinner?.classList.remove('d-none');
 
     try {
-      const [summary, modules] = await Promise.all([
+      const [summary, modules, samples, plan] = await Promise.all([
         Connection.fetchJson('/tests/summary'),
-        Connection.fetchJson('/tests/modules?limit=100&offset=0'),
+        Connection.fetchJson('/tests/modules?limit=200&offset=0'),
+        Connection.fetchJson('/tests/nugget-samples'),
+        Connection.fetchJson('/tests/plan?limit=200&offset=0'),
       ]);
+      Tests._nuggetSamples = samples.samples || {};
+      Tests._moduleList = modules;
+      Tests._planItems = plan.items || [];
+      Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
       Tests.renderSummary(summary);
       Tests.renderModuleAccordion(modules);
       Tests._modulesLoaded = true;
-      Tests.setStatus(`${summary.module_count} modules · ${summary.route_count} routes`);
+      Tests.setActionButtonsEnabled(Connection.isConnected());
+      const visible = Tests.visibleModules(modules);
+      const hidden = modules.length - visible.length;
+      const { runnable, skipped } = Tests.runnablePlanSummary();
+      Tests.setStatus(
+        `${summary.module_count} modules · ${plan.test_count ?? '—'} tests · ` +
+          `${visible.length} visible` +
+          (hidden ? ` (${hidden} need API keys)` : '') +
+          ` · plan ready (${runnable.length} runnable` +
+          (skipped ? `, ${skipped} skipped` : '') +
+          ')'
+      );
+      Tests.scheduleScrollSync();
     } catch (err) {
       Tests.setStatus(`Catalog load failed: ${err.message}`);
     } finally {
@@ -147,10 +882,30 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     }
   };
 
+  Tests.scheduleScrollSync = function () {
+    window.requestAnimationFrame(() => {
+      Tests.syncScrollLayout();
+    });
+  };
+
+  Tests.syncScrollLayout = function () {
+    const pane = document.getElementById('pane-tests');
+    const main = pane?.querySelector('.tests-main');
+    const region = document.getElementById('tests-scroll-region');
+    if (!pane || !main || !region || pane.classList.contains('d-none')) return;
+
+    const summary = main.querySelector('.border-bottom');
+    const footer = document.getElementById('tests-status');
+    const mainHeight = main.getBoundingClientRect().height;
+    const reserved = (summary?.offsetHeight ?? 0) + (footer?.offsetHeight ?? 0);
+    const height = Math.max(160, Math.floor(mainHeight - reserved));
+    region.style.height = `${height}px`;
+    region.style.maxHeight = `${height}px`;
+    region.style.overflowY = 'auto';
+  };
+
   Tests.onConnectionChange = function (connected) {
-    const disabled = !connected;
-    document.getElementById('tests-search')?.toggleAttribute('disabled', disabled);
-    document.getElementById('tests-refresh')?.toggleAttribute('disabled', disabled);
+    Tests.setActionButtonsEnabled(connected);
     if (connected && !Tests._modulesLoaded) {
       Tests.loadCatalog();
     }
@@ -159,10 +914,18 @@ window.Widgets.Tests = window.Widgets.Tests || {};
   Tests.bindFilters = function (root) {
     root.querySelector('#tests-refresh')?.addEventListener('click', () => {
       Tests._modulesLoaded = false;
-      document.querySelectorAll('[data-module-body]').forEach((el) => {
+      document.querySelectorAll('[data-module-content]').forEach((el) => {
         el.dataset.loaded = 'false';
       });
       Tests.loadCatalog();
+    });
+
+    root.querySelector('#tests-run-all')?.addEventListener('click', () => {
+      Tests.runAllTests();
+    });
+
+    root.querySelector('#tests-run-all-stop')?.addEventListener('click', () => {
+      Tests.stopRunAll();
     });
 
     root.querySelector('#tests-search')?.addEventListener('input', (event) => {
@@ -170,11 +933,26 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       const query = event.target.value.trim();
       Tests._searchTimer = setTimeout(async () => {
         try {
-          const path = query
-            ? `/tests/modules?search=${encodeURIComponent(query)}&limit=100`
-            : '/tests/modules?limit=100&offset=0';
-          const modules = await Connection.fetchJson(path);
+          const modulesPath = query
+            ? `/tests/modules?search=${encodeURIComponent(query)}&limit=200`
+            : '/tests/modules?limit=200&offset=0';
+          const [modules, plan] = await Promise.all([
+            Connection.fetchJson(modulesPath),
+            Connection.fetchJson(Tests.planPath(query)),
+          ]);
+          Tests._moduleList = modules;
+          Tests._planItems = plan.items || [];
+          Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
           Tests.renderModuleAccordion(modules);
+          Tests.updateRunStatsUI();
+          Tests.setActionButtonsEnabled(Connection.isConnected());
+          const { runnable, skipped } = Tests.runnablePlanSummary();
+          Tests.setStatus(
+            `${modules.length} modules · plan ready (${runnable.length} runnable` +
+              (skipped ? `, ${skipped} need input` : '') +
+              ')'
+          );
+          Tests.scheduleScrollSync();
         } catch (err) {
           Tests.setStatus(`Search failed: ${err.message}`);
         }
@@ -193,11 +971,29 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       Tests.onConnectionChange(true);
     }
 
+    window.addEventListener('resize', Tests.scheduleScrollSync);
+
     window.addEventListener('shell:tab-changed', (event) => {
-      if (event.detail?.tabId === 'tests' && Connection.isConnected() && !Tests._modulesLoaded) {
+      if (event.detail?.tabId === 'tests') {
+        Tests.scheduleScrollSync();
+        if (Connection.isConnected() && !Tests._modulesLoaded) {
+          Tests.loadCatalog();
+        }
+      }
+    });
+
+    window.addEventListener('subscriptions:updated', () => {
+      if (!Tests._modulesLoaded) return;
+      Tests._modulesLoaded = false;
+      document.querySelectorAll('[data-module-content]').forEach((el) => {
+        el.dataset.loaded = 'false';
+      });
+      if (Connection.isConnected()) {
         Tests.loadCatalog();
       }
     });
+
+    Tests.scheduleScrollSync();
   };
 
   Widgets.watchDOMForComponent(Tests.selectorPanel, Tests.initPanel);

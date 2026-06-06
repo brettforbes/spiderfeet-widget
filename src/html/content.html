@@ -62,6 +62,15 @@
             <button
               class="nav-link text-white-50 px-2 py-1"
               type="button"
+              data-shell-tab="subscriptions"
+            >
+              Subscriptions
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
               data-shell-tab="tests"
             >
               Tests
@@ -242,24 +251,7 @@
               class="position-absolute bottom-0 end-0 m-3 p-2 border rounded bg-body small shadow-sm"
               id="map-legend"
               aria-label="Graph legend"
-            >
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <span class="legend-swatch legend-swatch-service"></span>
-                <span>OSINT service</span>
-              </div>
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <span class="legend-swatch legend-swatch-nugget"></span>
-                <span>Nugget</span>
-              </div>
-              <div class="d-flex align-items-center gap-2">
-                <span class="legend-line legend-line-consumed"></span>
-                <span>Consumed</span>
-              </div>
-              <div class="d-flex align-items-center gap-2 mt-1">
-                <span class="legend-line legend-line-produced"></span>
-                <span>Produced</span>
-              </div>
-            </div>
+            ></div>
           </div>
 
           <footer
@@ -281,8 +273,8 @@
       data-shell-pane="tests"
       data-widget="tests-panel"
     >
-      <div class="row g-0 flex-grow-1 overflow-hidden">
-        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body" aria-label="Test filters">
+      <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Test filters">
           <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
           <div class="mb-3">
             <label for="tests-search" class="form-label small">Search modules</label>
@@ -294,27 +286,65 @@
               disabled
             />
           </div>
+          <div class="mb-3">
+            <label for="tests-timeout" class="form-label small">Scan timeout</label>
+            <select class="form-select form-select-sm" id="tests-timeout" disabled>
+              <option value="30">30 seconds</option>
+              <option value="60">60 seconds</option>
+              <option value="120" selected>120 seconds (default)</option>
+              <option value="180">180 seconds</option>
+              <option value="300">300 seconds</option>
+              <option value="600">600 seconds</option>
+            </select>
+          </div>
           <button
             type="button"
-            class="btn btn-primary btn-sm w-100 mb-3"
+            class="btn btn-primary btn-sm w-100 mb-2"
             id="tests-refresh"
             disabled
           >
             Refresh catalog
           </button>
+          <button
+            type="button"
+            class="btn btn-outline-primary btn-sm w-100 mb-2"
+            id="tests-run-all"
+            disabled
+            title="Run every module test in the current list, one at a time"
+          >
+            Run all tests
+          </button>
+          <button
+            type="button"
+            class="btn btn-outline-danger btn-sm w-100 mb-2 d-none"
+            id="tests-run-all-stop"
+          >
+            Stop batch
+          </button>
+          <div id="tests-global-progress-wrap" class="mb-2 d-none" aria-live="polite">
+            <div class="d-flex justify-content-between small text-body-secondary mb-1">
+              <span>Overall batch</span>
+              <span id="tests-global-progress-count">0 / 0</span>
+            </div>
+            <div class="progress tests-progress-global" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+              <div id="tests-global-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"></div>
+            </div>
+          </div>
+          <div id="tests-module-progress-list" class="mb-3"></div>
           <p class="small text-body-secondary mb-0">
-            Route execution arrives in Stage 4c. This view lists the module route matrix from the API catalog.
+            Expand a module for exploratory tests (one per consumed nugget). The input value
+            column shows the scan target that will be sent. Outcomes are discovered at run time.
           </p>
         </aside>
 
-        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden">
-          <div class="p-3 border-bottom bg-body">
+        <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden tests-main">
+          <div class="p-3 border-bottom bg-body flex-shrink-0">
             <h2 class="h6 text-uppercase text-body-secondary mb-2">Coverage summary</h2>
             <dl class="row small mb-0" id="tests-summary">
               <dt class="col-6 col-lg-3">Modules</dt>
               <dd class="col-6 col-lg-3 mb-1" data-count="modules">—</dd>
-              <dt class="col-6 col-lg-3">Routes</dt>
-              <dd class="col-6 col-lg-3 mb-1" data-count="routes">—</dd>
+              <dt class="col-6 col-lg-3">Tests</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="tests">—</dd>
               <dt class="col-6 col-lg-3">Groups</dt>
               <dd class="col-6 col-lg-3 mb-1" data-count="groups">—</dd>
               <dt class="col-6 col-lg-3">Not started</dt>
@@ -323,10 +353,16 @@
               <dd class="col-6 col-lg-3 mb-1" data-count="in-test">—</dd>
               <dt class="col-6 col-lg-3">Tested</dt>
               <dd class="col-6 col-lg-3 mb-1" data-count="tested">—</dd>
+              <dt class="col-6 col-lg-3">Passed (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="passed">0</dd>
+              <dt class="col-6 col-lg-3">Failed (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="failed">0</dd>
+              <dt class="col-6 col-lg-3">Skipped (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="skipped">0</dd>
             </dl>
           </div>
 
-          <div class="flex-grow-1 overflow-auto position-relative p-3">
+          <div class="flex-grow-1 overflow-auto position-relative p-3" id="tests-scroll-region">
             <div
               id="tests-spinner"
               class="position-absolute top-50 start-50 translate-middle d-none"
@@ -340,11 +376,86 @@
           </div>
 
           <footer
-            class="border-top px-3 py-2 small text-body-secondary"
+            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
             id="tests-status"
             aria-live="polite"
           >
             <span id="tests-status-text">Connect to the API to load the test catalog.</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-subscriptions"
+      role="tabpanel"
+      data-shell-pane="subscriptions"
+      data-widget="subscriptions-panel"
+    >
+      <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Subscription filters">
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
+          <div class="mb-3">
+            <label for="subscriptions-search" class="form-label small">Search modules</label>
+            <input
+              type="search"
+              class="form-control form-control-sm"
+              id="subscriptions-search"
+              placeholder="e.g. emailrep"
+              disabled
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-2"
+            id="subscriptions-refresh"
+            disabled
+          >
+            Refresh list
+          </button>
+          <p class="small text-body-secondary mb-0">
+            Configure API keys for OSINT services that require authentication. Saved keys unlock
+            matching modules in the Tests tab.
+          </p>
+        </aside>
+
+        <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden subscriptions-main">
+          <div class="p-3 border-bottom bg-body flex-shrink-0">
+            <h2 class="h6 text-uppercase text-body-secondary mb-2">Subscription summary</h2>
+            <dl class="row small mb-0" id="subscriptions-summary">
+              <dt class="col-6 col-lg-4">Key-required modules</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="total">—</dd>
+              <dt class="col-6 col-lg-4">Configured</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="configured">—</dd>
+              <dt class="col-6 col-lg-4">Missing keys</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="missing">—</dd>
+              <dt class="col-6 col-lg-4">Free tier</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="free-tier">—</dd>
+              <dt class="col-6 col-lg-4">Paid tier</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="paid-tier">—</dd>
+            </dl>
+          </div>
+
+          <div class="flex-grow-1 overflow-auto position-relative p-3" id="subscriptions-scroll-region">
+            <div
+              id="subscriptions-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading subscriptions</span>
+              </div>
+            </div>
+
+            <div class="accordion" id="subscriptions-module-accordion"></div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+            id="subscriptions-status"
+            aria-live="polite"
+          >
+            <span id="subscriptions-status-text">Connect to the API to load subscriptions.</span>
           </footer>
         </main>
       </div>

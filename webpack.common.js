@@ -136,13 +136,14 @@ module.exports = {
             ],
             //create one file for all widget js (explicit order — globs can miss files on dev rebuild)
             "widget.js": [
-                paths.src + '/js/#events.js',
                 paths.src + '/js/_namespace.js',
+                paths.src + '/js/#events.js',
                 paths.src + '/js/connection.js',
                 paths.src + '/js/shell.js',
                 paths.src + '/js/viz.core.js',
                 paths.src + '/js/viz.force.js',
                 paths.src + '/js/map.js',
+                paths.src + '/js/subscriptions.js',
                 paths.src + '/js/tests.js',
                 paths.src + '/js/app.js',
             ],

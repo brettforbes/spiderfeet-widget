@@ -44,13 +44,29 @@ window.Widgets.Connection = window.Widgets.Connection || {};
     badge.className = `badge rounded-pill text-bg-${tone || 'secondary'}`;
   };
 
-  Connection.fetchJson = async function (path, options) {
-    const response = await fetch(Connection.apiUrl(path), options);
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`${response.status} ${response.statusText}: ${detail}`);
+  Connection.fetchJson = async function (path, options = {}) {
+    const timeoutMs = options.timeoutMs ?? 15000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const fetchOptions = { ...options };
+    delete fetchOptions.timeoutMs;
+    fetchOptions.signal = controller.signal;
+
+    try {
+      const response = await fetch(Connection.apiUrl(path), fetchOptions);
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`${response.status} ${response.statusText}: ${detail}`);
+      }
+      return response.json();
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json();
   };
 
   Connection.refreshStatus = async function () {
@@ -71,6 +87,7 @@ window.Widgets.Connection = window.Widgets.Connection || {};
       Connection._lastStatus = null;
       Connection.setConnectionBadge('Offline', 'danger');
       Connection._notify();
+      console.error('Connection.refreshStatus failed', err);
       throw err;
     }
   };
@@ -89,9 +106,8 @@ window.Widgets.Connection = window.Widgets.Connection || {};
     }
   };
 
-  Connection.init = function ($root) {
-    const el = $root[0];
-    if (el.dataset.initialized) return;
+  Connection.initElement = function (el) {
+    if (!el || el.dataset.initialized === 'true') return;
     el.dataset.initialized = 'true';
 
     const apiBase = document.getElementById('widget-root')?.dataset.apiBase;
@@ -104,7 +120,24 @@ window.Widgets.Connection = window.Widgets.Connection || {};
     Connection.refreshStatus().catch(() => {});
   };
 
+  Connection.init = function ($root) {
+    const el = $root && $root.jquery ? $root[0] : $root;
+    Connection.initElement(el);
+  };
+
+  Connection.boot = function () {
+    document.querySelectorAll(Connection.selector).forEach((el) => {
+      Connection.initElement(el);
+    });
+  };
+
   Widgets.watchDOMForComponent(Connection.selector, Connection.init);
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', Connection.boot);
+  } else {
+    Connection.boot();
+  }
 })(
   window.jQuery,
   window.Widgets.Connection,
