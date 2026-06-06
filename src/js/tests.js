@@ -273,6 +273,19 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     return `${moduleId}::${consumedId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
   };
 
+  Tests.isStrictPass = function (status, producedCount, fixtureKind) {
+    if (status !== 'FINISHED') return false;
+    if (fixtureKind === 'negative') return producedCount === 0;
+    return producedCount > 0;
+  };
+
+  Tests.fixtureKindLabel = function (fixtureKind) {
+    if (fixtureKind === 'negative') {
+      return '<span class="badge text-bg-secondary ms-1" title="Expect FINISHED with zero output on clean input">negative</span>';
+    }
+    return '';
+  };
+
   Tests.renderTestsTable = function (container, detail) {
     const connected = Connection.isConnected();
     const rows = (detail.tests || [])
@@ -283,9 +296,10 @@ window.Widgets.Tests = window.Widgets.Tests || {};
         const runTitle = hasInput
           ? `Run with input ${inputValue}`
           : 'No default input — enter value when prompted';
+        const fixtureKind = test.fixture_kind || 'positive';
         return `
       <tr data-test-row="${rowId}">
-        <td class="small font-monospace">${test.consumed_nugget_id}</td>
+        <td class="small font-monospace">${test.consumed_nugget_id}${Tests.fixtureKindLabel(fixtureKind)}</td>
         <td class="small font-monospace">${hasInput ? Tests.escapeHtml(inputValue) : '<span class="text-body-secondary">—</span>'}</td>
         <td>
           <span class="badge ${Tests.stateBadgeClass(test.test_state)}" data-test-state>${test.test_state}</span>
@@ -296,6 +310,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
             data-module-id="${detail.module_id}"
             data-consumed="${test.consumed_nugget_id}"
             data-input="${Tests.escapeHtml(inputValue)}"
+            data-fixture-kind="${Tests.escapeHtml(fixtureKind)}"
             title="${runTitle}"
             ${connected ? '' : 'disabled'}>
             Run
@@ -341,38 +356,48 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     return manual ? manual.trim() : null;
   };
 
-  Tests.renderScanResultHtml = function (body) {
+  Tests.renderScanResultHtml = function (body, options) {
+    const opts = options || {};
+    const fixtureKind = opts.fixtureKind || 'positive';
     const record = body.scan_record || {};
     const produced = body.produced || [];
     const producedTypes = [...new Set(produced.map((n) => n.nugget_id))];
     const status = record.status || record.scan_status || 'UNKNOWN';
     const duration = Tests.formatDuration(record.scan_duration);
     const eventCount = record.scan_event_count ?? record.scan_results?.event_count ?? 0;
+    const passed = Tests.isStrictPass(status, produced.length, fixtureKind);
     const discovered =
       producedTypes.length > 0
         ? `Discovered: ${producedTypes.join(', ')}`
-        : 'No produced nuggets yet';
+        : fixtureKind === 'negative' && passed
+          ? 'Expected: no listing/block (negative fixture)'
+          : 'No produced nuggets yet';
     let reason = '';
     if (status !== 'FINISHED') {
       reason = `status-${String(status).toLowerCase()}`;
-    } else if (produced.length === 0) {
+    } else if (!passed && fixtureKind !== 'negative' && produced.length === 0) {
       reason = 'no-produced-objects';
+    } else if (!passed && fixtureKind === 'negative' && produced.length > 0) {
+      reason = 'unexpected-produced-objects';
     }
     const noOutputReasonLabel =
       reason === 'no-produced-objects'
         ? 'No output objects returned'
-        : reason.startsWith('status-')
-          ? `Scan status ${status}`
-          : '';
-    const tone = status === 'FINISHED' && produced.length > 0 ? 'success-subtle' : 'danger-subtle';
+        : reason === 'unexpected-produced-objects'
+          ? 'Negative fixture expected zero output'
+          : reason.startsWith('status-')
+            ? `Scan status ${status}`
+            : '';
+    const tone = passed ? 'success-subtle' : 'danger-subtle';
 
     return {
       status,
       producedCount: produced.length,
       discoveredLabel: discovered,
       reason,
+      passed,
       html: `<div class="d-flex flex-wrap gap-2 align-items-center mb-1">
-          <span class="badge text-bg-${status === 'FINISHED' && produced.length > 0 ? 'success' : 'danger'}">${status}</span>
+          <span class="badge text-bg-${passed ? 'success' : 'danger'}">${status}</span>
           <span class="text-body-secondary">${duration} · ${eventCount} events · ${produced.length} produced</span>
           <span class="badge text-bg-info">${Tests.escapeHtml(discovered)}</span>
           ${
@@ -389,7 +414,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     };
   };
 
-  Tests.executeTest = async function ({ moduleId, consumedId, inputValue }) {
+  Tests.executeTest = async function ({ moduleId, consumedId, inputValue, fixtureKind }) {
     const rowId = Tests.testRowId(moduleId, consumedId);
 
     const nuggetData = Tests.resolveTarget(consumedId, inputValue || '', { skipPrompt: true });
@@ -428,8 +453,10 @@ window.Widgets.Tests = window.Widgets.Tests || {};
         timeoutMs: Tests.fetchTimeoutMs(),
       });
 
-      const parsed = Tests.renderScanResultHtml(body);
-      if (parsed.status === 'FINISHED' && parsed.producedCount > 0) {
+      const parsed = Tests.renderScanResultHtml(body, {
+        fixtureKind: fixtureKind || 'positive',
+      });
+      if (parsed.passed) {
         Tests.updateTestStateBadge(rowId, 'in-test');
       } else {
         Tests.updateTestStateBadge(rowId, 'error');
@@ -437,7 +464,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       Tests.showTestResult(rowId, parsed.html, parsed.tone);
 
       return {
-        ok: parsed.status === 'FINISHED' && parsed.producedCount > 0,
+        ok: parsed.passed,
         rowId,
         status: parsed.status,
         producedCount: parsed.producedCount,
@@ -466,6 +493,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     const moduleId = button.dataset.moduleId;
     const consumedId = button.dataset.consumed;
     const inputValue = button.dataset.input || '';
+    const fixtureKind = button.dataset.fixtureKind || 'positive';
 
     const nuggetData = Tests.resolveTarget(consumedId, inputValue);
     if (!nuggetData) return;
@@ -476,6 +504,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       moduleId,
       consumedId,
       inputValue: nuggetData,
+      fixtureKind,
     });
 
     if (outcome.skipped) return;
@@ -524,6 +553,8 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       requiresApiKey: Boolean(row.requires_api_key),
       hasApiKey: row.has_api_key !== false,
       skipReason: row.skip_reason || null,
+      fixtureKind: row.fixture_kind || 'positive',
+      seedValidated: Boolean(row.seed_validated),
     }));
   };
 
