@@ -108,11 +108,24 @@
   function appendNodeShape(nodeSel, colour, nodeDisplay) {
     nodeSel.each(function (d) {
       const group = d3.select(this);
-      group.selectAll('circle, image').remove();
+      group.selectAll('circle, image, rect').remove();
 
       if (nodeDisplay === 'icons' && d.iconUrl) {
         const size = d.iconSize || 28;
         const hitR = size / 2;
+        const isService = d.group === 'service';
+        if (!isService) {
+          group
+            .append('rect')
+            .attr('class', 'node-icon-bg')
+            .attr('width', size)
+            .attr('height', size)
+            .attr('rx', 4)
+            .attr('x', -size / 2)
+            .attr('y', -size / 2)
+            .attr('fill', d.colour || '#3B82F6')
+            .attr('pointer-events', 'none');
+        }
         group
           .append('circle')
           .attr('class', 'node-hit')

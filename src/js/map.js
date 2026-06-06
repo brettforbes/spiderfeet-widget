@@ -5,10 +5,24 @@ window.Widgets.Map = window.Widgets.Map || {};
   'use strict';
 
   Map.selectorPanel = '[data-widget="maps-panel"]';
-  Map.SERVICE_COLOUR = '#6366f1';
+  Map.SERVICE_COLOUR = '#57534E';
   Map.NUGGET_FALLBACK = '#3b82f6';
   Map.SERVICE_ICON = 'icon_software_used.svg';
   Map.ICON_BASE = 'icons/';
+
+  /** Nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
+  Map.NUGGET_TYPE_LEGEND = [
+    { type: 'ENTITY', label: 'Entity', colour: '#3B82F6' },
+    { type: 'DESCRIPTOR', label: 'Descriptor', colour: '#F59E0B' },
+    { type: 'DATA', label: 'Data', colour: '#14B8A6' },
+    { type: 'SUBENTITY', label: 'Sub-entity', colour: '#F97316' },
+    { type: 'INTERNAL', label: 'Internal', colour: '#8B5CF6' },
+  ];
+
+  Map.LINK_LEGEND = [
+    { label: 'Consumed', className: 'legend-line legend-line-consumed' },
+    { label: 'Produced', className: 'legend-line legend-line-produced' },
+  ];
 
   Map._graphInstance = null;
   Map._renderGeneration = 0;
@@ -92,6 +106,49 @@ window.Widgets.Map = window.Widgets.Map || {};
 
   Map.showEmpty = function (show) {
     document.getElementById('viz-empty')?.classList.toggle('d-none', !show);
+  };
+
+  Map.legendRow = function (swatchHtml, label, extraClass) {
+    return `<div class="d-flex align-items-center gap-2 mb-1${extraClass ? ` ${extraClass}` : ''}">${swatchHtml}<span>${label}</span></div>`;
+  };
+
+  Map.renderLegend = function (mode) {
+    const root = document.getElementById('map-legend');
+    if (!root) return;
+
+    const swatchClass =
+      mode === 'icons' ? 'legend-swatch legend-swatch-rounded' : 'legend-swatch';
+
+    const rows = [];
+    rows.push(
+      Map.legendRow(
+        `<span class="legend-swatch" style="background-color:${Map.SERVICE_COLOUR}"></span>`,
+        'OSINT service'
+      )
+    );
+
+    rows.push('<div class="legend-section-label">Nugget types</div>');
+    Map.NUGGET_TYPE_LEGEND.forEach((entry) => {
+      rows.push(
+        Map.legendRow(
+          `<span class="${swatchClass}" style="background-color:${entry.colour}"></span>`,
+          entry.label
+        )
+      );
+    });
+
+    rows.push('<div class="legend-section-label">Links</div>');
+    Map.LINK_LEGEND.forEach((entry, index) => {
+      rows.push(
+        Map.legendRow(
+          `<span class="${entry.className}"></span>`,
+          entry.label,
+          index > 0 ? 'mt-1' : ''
+        )
+      );
+    });
+
+    root.innerHTML = rows.join('');
   };
 
   Map.transformGraph = function (payload) {
@@ -206,6 +263,7 @@ window.Widgets.Map = window.Widgets.Map || {};
 
     document.getElementById('map-node-count').textContent = `${nodes.length} nodes · ${links.length} links`;
     Map.setStatus(`Graph loaded (${nodes.length} nodes, ${links.length} links)`);
+    Map.renderLegend(Map._nodeDisplay);
   };
 
   Map.loadGraph = async function () {
@@ -242,6 +300,7 @@ window.Widgets.Map = window.Widgets.Map || {};
     if (mode !== 'circles' && mode !== 'icons') return;
     Map._nodeDisplay = mode;
     Map.setNodeDisplayButtons(mode);
+    Map.renderLegend(mode);
     if (Map._lastGraphPayload) {
       Map.renderGraph(Map._lastGraphPayload);
     }
@@ -285,6 +344,7 @@ window.Widgets.Map = window.Widgets.Map || {};
 
     Map.setVariantButtons(Map._variant);
     Map.setNodeDisplayButtons(Map._nodeDisplay);
+    Map.renderLegend(Map._nodeDisplay);
     Map.setControlsEnabled(Connection.isConnected());
     Map.showEmpty(true);
 
@@ -301,6 +361,18 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Widgets.watchDOMForComponent(Map.selectorPanel, Map.initPanel);
+
+  function bootMapLegend() {
+    if (document.getElementById('map-legend')) {
+      Map.renderLegend(Map._nodeDisplay);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootMapLegend);
+  } else {
+    bootMapLegend();
+  }
 })(
   window.jQuery,
   window.Widgets.Map,
