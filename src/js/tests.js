@@ -12,7 +12,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
   Tests._runAllCancel = false;
   Tests._runningRoute = null;
   Tests._progress = { global: { done: 0, total: 0 }, modules: {} };
-  Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+  Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0, pendingSeedSkipped: 0 };
 
   Tests.getTimeoutSeconds = function () {
     const el = document.getElementById('tests-timeout');
@@ -163,10 +163,14 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     Tests.setSummaryField(root, 'passed', Tests._runStats.passed);
     Tests.setSummaryField(root, 'failed', Tests._runStats.failed);
     Tests.setSummaryField(root, 'skipped', Tests._runStats.skipped);
+    Tests.setSummaryField(root, 'needs-key', summary.missing_api_key_count ?? '—');
+    Tests.setSummaryField(root, 'seed-validated', summary.seed_validated_count ?? '—');
+    Tests.setSummaryField(root, 'pending-seed', summary.pending_seed_count ?? '—');
+    Tests.setSummaryField(root, 'runnable', summary.runnable_count ?? '—');
   };
 
   Tests.resetRunStats = function () {
-    Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+    Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0, pendingSeedSkipped: 0 };
     Tests.renderSummary({ test_states: {}, route_states: {} });
   };
 
@@ -190,6 +194,11 @@ window.Widgets.Tests = window.Widgets.Tests || {};
   Tests.isModuleVisible = function (mod) {
     const meta = Tests.moduleSubscriptionMeta(mod);
     return !meta.requiresKey || meta.hasKey;
+  };
+
+  Tests.moduleSeedValidated = function (mod) {
+    const rows = Tests._planItems.filter((row) => row.module_id === mod.module_id);
+    return rows.some((row) => Boolean(row.seed_validated));
   };
 
   Tests.visibleModules = function (modules) {
@@ -231,6 +240,11 @@ window.Widgets.Tests = window.Widgets.Tests || {};
             <span class="me-2 fw-semibold">${mod.module_id}</span>
             <span class="text-body-secondary small me-2">${mod.name}</span>
             ${Tests.subscriptionTierBadgeHtml(tier, missingKey)}
+            ${
+              Tests.moduleSeedValidated(mod)
+                ? ''
+                : '<span class="badge text-bg-warning me-2" title="Seed not validated — excluded from Run validated tests">pending seed</span>'
+            }
             <span class="badge text-bg-light border ms-auto me-2">${mod.test_count ?? '—'} tests</span>
             ${
               (mod.tests_run ?? mod.routes_tested)
@@ -559,8 +573,17 @@ window.Widgets.Tests = window.Widgets.Tests || {};
   };
 
   Tests.runnablePlanSummary = function (moduleId) {
-    const { runnable, skipped } = Tests.filterRunnable(Tests.planToQueue(moduleId));
-    return { runnable, skipped, total: runnable.length + skipped };
+    const filterOpts = { validatedOnly: Tests.runValidatedOnly() };
+    const { runnable, skipped, skippedMissingKey, skippedNoInput, skippedPendingSeed } =
+      Tests.filterRunnable(Tests.planToQueue(moduleId), filterOpts);
+    return {
+      runnable,
+      skipped,
+      skippedMissingKey,
+      skippedNoInput,
+      skippedPendingSeed,
+      total: runnable.length + skipped,
+    };
   };
 
   Tests.setRunningModuleHighlight = function (moduleId) {
@@ -577,9 +600,12 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     if (message) Tests.setStatus(message);
   };
 
-  Tests.filterRunnable = function (queue) {
+  Tests.filterRunnable = function (queue, options) {
+    const opts = options || {};
+    const validatedOnly = opts.validatedOnly !== false;
     let skippedNoInput = 0;
     let skippedMissingKey = 0;
+    let skippedPendingSeed = 0;
     const runnable = queue.filter((item) => {
       if (item.skipReason === 'missing-api-key') {
         skippedMissingKey += 1;
@@ -589,14 +615,24 @@ window.Widgets.Tests = window.Widgets.Tests || {};
         skippedNoInput += 1;
         return false;
       }
+      if (validatedOnly && !item.seedValidated) {
+        skippedPendingSeed += 1;
+        return false;
+      }
       return true;
     });
     return {
       runnable,
-      skipped: skippedNoInput + skippedMissingKey,
+      skipped: skippedNoInput + skippedMissingKey + skippedPendingSeed,
       skippedNoInput,
       skippedMissingKey,
+      skippedPendingSeed,
     };
+  };
+
+  Tests.runValidatedOnly = function () {
+    const checkbox = document.getElementById('tests-run-unvalidated');
+    return !checkbox?.checked;
   };
 
   Tests.resetBatchProgress = function (runnable, resetGlobal) {
@@ -646,12 +682,19 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     const controlsActive = Boolean(options.controlsAlreadyActive);
     const preSkipped = options.preSkipped || 0;
     const preKeySkipped = options.preKeySkipped || 0;
+    const prePendingSeedSkipped = options.prePendingSeedSkipped || 0;
 
     if (!controlsActive) {
       Tests._runAllCancel = false;
       Tests.setBatchControls(true, { showGlobalProgress: trackGlobal });
     }
-    Tests._runStats = { passed: 0, failed: 0, skipped: preSkipped, keySkipped: preKeySkipped };
+    Tests._runStats = {
+      passed: 0,
+      failed: 0,
+      skipped: preSkipped,
+      keySkipped: preKeySkipped,
+      pendingSeedSkipped: prePendingSeedSkipped,
+    };
     Tests.updateRunStatsUI();
     Tests.resetBatchProgress(runnable, trackGlobal);
 
@@ -706,22 +749,29 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       }
     }
 
-    const { runnable, skipped, skippedMissingKey, skippedNoInput } = Tests.runnablePlanSummary();
+    const { runnable, skipped, skippedMissingKey, skippedNoInput, skippedPendingSeed } =
+      Tests.runnablePlanSummary();
     if (!runnable.length) {
-      Tests.setStatus('No tests with input values to run.');
+      Tests.setStatus(
+        skippedPendingSeed && Tests.runValidatedOnly()
+          ? 'No seed-validated tests to run. Enable “Include pending-seed tests” or tune seeds in the backend.'
+          : 'No tests with input values to run.'
+      );
       return;
     }
 
     const timeout = Tests.getTimeoutSeconds();
+    const modeLabel = Tests.runValidatedOnly() ? 'validated' : 'all runnable';
     const label =
       skipped > 0
-        ? `${runnable.length} tests (${skipped} skipped)`
-        : `${runnable.length} tests`;
+        ? `${runnable.length} ${modeLabel} tests (${skipped} skipped)`
+        : `${runnable.length} ${modeLabel} tests`;
     if (
       !window.confirm(
-        `Run ${label} in ${Tests.visibleModules(Tests._moduleList).length} modules sequentially?\n\n` +
+        `Run ${label} sequentially?\n\n` +
           `Uses scan_ui API. Timeout: ${timeout}s per test.\n` +
-          `${skippedMissingKey ? `Missing API key: ${skippedMissingKey}\n` : ''}` +
+          `${skippedMissingKey ? `Needs API key (not run): ${skippedMissingKey}\n` : ''}` +
+          `${skippedPendingSeed ? `Pending seed (not run): ${skippedPendingSeed}\n` : ''}` +
           `${skippedNoInput ? `No input sample: ${skippedNoInput}` : ''}`
       )
     ) {
@@ -733,10 +783,11 @@ window.Widgets.Tests = window.Widgets.Tests || {};
 
     await Tests.runBatch(runnable, {
       trackGlobal: true,
-      label: 'Overall batch',
+      label: Tests.runValidatedOnly() ? 'Validated batch' : 'Full batch',
       skipped,
       preSkipped: skipped,
       preKeySkipped: skippedMissingKey,
+      prePendingSeedSkipped: skippedPendingSeed,
       controlsAlreadyActive: true,
     });
   };
@@ -753,7 +804,8 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       }
     }
 
-    const { runnable, skipped, skippedMissingKey, skippedNoInput } = Tests.runnablePlanSummary(moduleId);
+    const { runnable, skipped, skippedMissingKey, skippedNoInput, skippedPendingSeed } =
+      Tests.runnablePlanSummary(moduleId);
     if (!runnable.length) {
       Tests.setStatus(`No runnable tests for ${moduleId}.`);
       return;
@@ -767,7 +819,8 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     if (
       !window.confirm(
         `Run ${label}?\n\nUses scan_ui API. Timeout: ${timeout}s per test.\n` +
-          `${skippedMissingKey ? `Missing API key: ${skippedMissingKey}\n` : ''}` +
+          `${skippedMissingKey ? `Needs API key (not run): ${skippedMissingKey}\n` : ''}` +
+          `${skippedPendingSeed ? `Pending seed (not run): ${skippedPendingSeed}\n` : ''}` +
           `${skippedNoInput ? `No input sample: ${skippedNoInput}` : ''}`
       )
     ) {
@@ -846,6 +899,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       'disabled',
       !connected || batchRunning || !Tests._moduleList.length
     );
+    document.getElementById('tests-run-unvalidated')?.toggleAttribute('disabled', !connected || batchRunning);
     Tests.setRunButtonsEnabled(connected && !batchRunning);
   };
 
@@ -889,21 +943,18 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       Tests._nuggetSamples = samples.samples || {};
       Tests._moduleList = modules;
       Tests._planItems = plan.items || [];
-      Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+      Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0, pendingSeedSkipped: 0 };
       Tests.renderSummary(summary);
       Tests.renderModuleAccordion(modules);
       Tests._modulesLoaded = true;
       Tests.setActionButtonsEnabled(Connection.isConnected());
-      const visible = Tests.visibleModules(modules);
-      const hidden = modules.length - visible.length;
-      const { runnable, skipped } = Tests.runnablePlanSummary();
+      const { runnable, skipped, skippedMissingKey, skippedPendingSeed } = Tests.runnablePlanSummary();
       Tests.setStatus(
-        `${summary.module_count} modules · ${plan.test_count ?? '—'} tests · ` +
-          `${visible.length} visible` +
-          (hidden ? ` (${hidden} need API keys)` : '') +
-          ` · plan ready (${runnable.length} runnable` +
-          (skipped ? `, ${skipped} skipped` : '') +
-          ')'
+        `${summary.module_count} modules · ${summary.seed_validated_count ?? '—'} seed-validated · ` +
+          `${summary.missing_api_key_count ?? '—'} need API keys · ` +
+          `${summary.pending_seed_count ?? '—'} pending seed · ` +
+          `Run validated = ${runnable.length} tests` +
+          (skipped ? ` (${skipped} excluded)` : '')
       );
       Tests.scheduleScrollSync();
     } catch (err) {
@@ -973,7 +1024,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
           ]);
           Tests._moduleList = modules;
           Tests._planItems = plan.items || [];
-          Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0 };
+          Tests._runStats = { passed: 0, failed: 0, skipped: 0, keySkipped: 0, pendingSeedSkipped: 0 };
           Tests.renderModuleAccordion(modules);
           Tests.updateRunStatsUI();
           Tests.setActionButtonsEnabled(Connection.isConnected());
