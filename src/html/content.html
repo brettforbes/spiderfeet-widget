@@ -310,10 +310,21 @@
             class="btn btn-outline-primary btn-sm w-100 mb-2"
             id="tests-run-all"
             disabled
-            title="Run every module test in the current list, one at a time"
+            title="Run seed-validated tests only (configure keys in Subscriptions for auth modules)"
           >
-            Run all tests
+            Run validated tests
           </button>
+          <div class="form-check form-check-sm mb-2">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="tests-run-unvalidated"
+              disabled
+            />
+            <label class="form-check-label small" for="tests-run-unvalidated">
+              Include pending-seed tests (unvalidated inputs)
+            </label>
+          </div>
           <button
             type="button"
             class="btn btn-outline-danger btn-sm w-100 mb-2 d-none"
@@ -359,6 +370,14 @@
               <dd class="col-6 col-lg-3 mb-1" data-count="failed">0</dd>
               <dt class="col-6 col-lg-3">Skipped (session)</dt>
               <dd class="col-6 col-lg-3 mb-1" data-count="skipped">0</dd>
+              <dt class="col-6 col-lg-3">Needs API key</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="needs-key">—</dd>
+              <dt class="col-6 col-lg-3">Seed validated</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="seed-validated">—</dd>
+              <dt class="col-6 col-lg-3">Pending seed</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="pending-seed">—</dd>
+              <dt class="col-6 col-lg-3">Runnable now</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="runnable">—</dd>
             </dl>
           </div>
 
