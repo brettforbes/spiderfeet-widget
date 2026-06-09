@@ -27,6 +27,9 @@ Read **bootstrap** and **d3js** skills before editing UI.
 
 - Accordions grouped by `module_id`; summary table above list
 - Per-route: run button, CLI/API copy, mini graph, results/duration/status
+- **Pass:** positive → produced output; negative → `module_execution.verdict === 'clean_miss'`
+- **Fixture icons:** positive vs negative from API `fixture_kind` / catalogue `fixture_category`
+- Backend omits `service_state: error` modules (8 upstream-broken); do not hard-code that list in widget
 
 ## Connection gating
 

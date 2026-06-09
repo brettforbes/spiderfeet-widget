@@ -29,8 +29,15 @@ Only **Maps** and **Tests** are implemented in stages 3–4; others remain **emp
 
 Stages 5–8 UI (investigation workspace, quarantine tooling, favourites runner).
 
+## Stage 4 Tests behaviour (backend contract)
+
+- Module list comes from `/api/v1/tests/*` — **excludes** `service_state: error` (8 upstream-broken modules).
+- **Positive pass:** produced nuggets. **Negative pass:** `module_execution.verdict === 'clean_miss'` (not zero output alone).
+- Show fixture icon from `fixture_kind` / `fixture_category` (positive vs negative).
+- Backend guide: `@spiderfeet/.docs/analysis/stage4_seed_corpus_and_tests.md`
+
 ## Execution
 
-1. Bind to SPEC-002 R2-03-03 / R2-04-04 when implementing UI stories
+1. Bind to SPEC-002 R2-03-03 / R2-04-04 / R2-04-08 when implementing UI stories
 2. Branch `feature/<issue>-<slug>`; PR to `develop`
 3. Exploratory review on Maps (#SFW-03-18) and Tests (#SFW-04-09) per GOV-08

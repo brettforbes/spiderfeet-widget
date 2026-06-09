@@ -37,10 +37,16 @@ Full detail: `.governance/project/GIT_WORKFLOW.md`
 
 ## Operating rules
 
-1. **Stage 0–4 work** must map to SPEC-002 requirement IDs (widget: R2-03-03, R2-04-04, etc.).
+1. **Stage 0–4 work** must map to SPEC-002 requirement IDs (widget: R2-03-03, R2-04-04, R2-04-08, etc.).
 2. Use **bootstrap** and **d3js** skills from spiderfeet for UI work (multi-root workspace).
 3. API calls go to spiderfeet FastAPI — never TypeDB from the browser.
 4. **Commit policy:** only when the operator explicitly requests commits.
+
+## Tests tab contract
+
+- Backend guide: `@spiderfeet/.docs/analysis/stage4_seed_corpus_and_tests.md`
+- Negative fixtures pass on `module_execution.verdict === 'clean_miss'`, not empty produced alone.
+- Tests/Subscriptions APIs exclude upstream-broken modules (`service_state: error`); trust API lists, do not duplicate the eight module IDs in widget code.
 
 ## Continuity
 

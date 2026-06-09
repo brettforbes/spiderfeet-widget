@@ -237,6 +237,7 @@ window.Widgets.Tests = window.Widgets.Tests || {};
             data-bs-toggle="collapse" data-bs-target="#${itemId}-body"
             aria-expanded="false" aria-controls="${itemId}-body"
             data-module-id="${mod.module_id}">
+            ${Tests.fixtureCategoryIconHtml(mod.fixture_category || 'positive')}
             <span class="me-2 fw-semibold">${mod.module_id}</span>
             <span class="text-body-secondary small me-2">${mod.name}</span>
             ${Tests.subscriptionTierBadgeHtml(tier, missingKey)}
@@ -287,15 +288,27 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     return `${moduleId}::${consumedId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
   };
 
-  Tests.isStrictPass = function (status, producedCount, fixtureKind) {
+  Tests.isStrictPass = function (status, producedCount, fixtureKind, moduleExecution) {
     if (status !== 'FINISHED') return false;
-    if (fixtureKind === 'negative') return producedCount === 0;
+    if (fixtureKind === 'negative') {
+      if (moduleExecution?.verdict) {
+        return moduleExecution.verdict === 'clean_miss';
+      }
+      return producedCount === 0;
+    }
     return producedCount > 0;
+  };
+
+  Tests.fixtureCategoryIconHtml = function (fixtureCategory) {
+    if (fixtureCategory === 'negative') {
+      return '<i class="fa-solid fa-filter-circle-xmark text-secondary me-2" title="Negative fixture — clean input expects clean_miss"></i>';
+    }
+    return '<i class="fa-solid fa-bullseye text-success me-2" title="Positive fixture — expects discovered objects"></i>';
   };
 
   Tests.fixtureKindLabel = function (fixtureKind) {
     if (fixtureKind === 'negative') {
-      return '<span class="badge text-bg-secondary ms-1" title="Expect FINISHED with zero output on clean input">negative</span>';
+      return '<span class="badge text-bg-secondary ms-1" title="Expect FINISHED + clean_miss on clean input">negative</span>';
     }
     return '';
   };
@@ -375,22 +388,30 @@ window.Widgets.Tests = window.Widgets.Tests || {};
     const fixtureKind = opts.fixtureKind || 'positive';
     const record = body.scan_record || {};
     const produced = body.produced || [];
+    const moduleExecution = body.module_execution || null;
     const producedTypes = [...new Set(produced.map((n) => n.nugget_id))];
     const status = record.status || record.scan_status || 'UNKNOWN';
     const duration = Tests.formatDuration(record.scan_duration);
     const eventCount = record.scan_event_count ?? record.scan_results?.event_count ?? 0;
-    const passed = Tests.isStrictPass(status, produced.length, fixtureKind);
+    const passed = Tests.isStrictPass(status, produced.length, fixtureKind, moduleExecution);
+    const verdict = moduleExecution?.verdict || null;
     const discovered =
       producedTypes.length > 0
         ? `Discovered: ${producedTypes.join(', ')}`
         : fixtureKind === 'negative' && passed
-          ? 'Expected: no listing/block (negative fixture)'
-          : 'No produced nuggets yet';
+          ? 'Verdict: clean_miss (negative fixture)'
+          : verdict
+            ? `Verdict: ${verdict}`
+            : 'No produced nuggets yet';
     let reason = '';
     if (status !== 'FINISHED') {
       reason = `status-${String(status).toLowerCase()}`;
     } else if (!passed && fixtureKind !== 'negative' && produced.length === 0) {
       reason = 'no-produced-objects';
+    } else if (!passed && fixtureKind === 'negative' && verdict === 'absent_violation') {
+      reason = 'absent-violation';
+    } else if (!passed && fixtureKind === 'negative' && verdict && verdict !== 'clean_miss') {
+      reason = `verdict-${verdict}`;
     } else if (!passed && fixtureKind === 'negative' && produced.length > 0) {
       reason = 'unexpected-produced-objects';
     }
@@ -398,10 +419,14 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       reason === 'no-produced-objects'
         ? 'No output objects returned'
         : reason === 'unexpected-produced-objects'
-          ? 'Negative fixture expected zero output'
-          : reason.startsWith('status-')
-            ? `Scan status ${status}`
-            : '';
+          ? 'Negative fixture expected clean_miss'
+          : reason === 'absent-violation'
+            ? `Absent types violated: ${(moduleExecution?.absent_violations || []).join(', ')}`
+            : reason.startsWith('verdict-')
+              ? `Module verdict ${verdict}`
+              : reason.startsWith('status-')
+                ? `Scan status ${status}`
+                : '';
     const tone = passed ? 'success-subtle' : 'danger-subtle';
 
     return {
@@ -412,6 +437,11 @@ window.Widgets.Tests = window.Widgets.Tests || {};
       passed,
       html: `<div class="d-flex flex-wrap gap-2 align-items-center mb-1">
           <span class="badge text-bg-${passed ? 'success' : 'danger'}">${status}</span>
+          ${
+            verdict
+              ? `<span class="badge text-bg-${verdict === 'clean_miss' ? 'secondary' : 'info'}">${Tests.escapeHtml(verdict)}</span>`
+              : ''
+          }
           <span class="text-body-secondary">${duration} · ${eventCount} events · ${produced.length} produced</span>
           <span class="badge text-bg-info">${Tests.escapeHtml(discovered)}</span>
           ${
