@@ -180,6 +180,61 @@ body {
   border-radius: 3px;
 }
 
+.legend-swatch-ring {
+  background: transparent;
+  border: 2px solid var(--swatch-colour);
+  box-sizing: border-box;
+}
+
+.map-fixture-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.map-fixture-swatch-positive {
+  background-color: #57534e;
+}
+
+.map-fixture-swatch-negative {
+  background-color: #991b1b;
+}
+
+.map-status-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.map-status-swatch-passes {
+  background-color: #16a34a;
+}
+
+.map-status-swatch-subscription {
+  background-color: #d97706;
+}
+
+.map-status-swatch-error {
+  background-color: #dc2626;
+}
+
+.subscriptions-signup-table-wrap {
+  max-height: 16rem;
+  overflow: auto;
+}
+
+#subscriptions-signup-table .btn {
+  white-space: nowrap;
+}
+
+.node-icon-ring {
+  pointer-events: none;
+}
+
 .legend-section-label {
   font-size: 0.65rem;
   letter-spacing: 0.04em;

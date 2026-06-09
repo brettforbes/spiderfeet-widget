@@ -8,6 +8,26 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
   Subscriptions._loaded = false;
   Subscriptions._moduleList = [];
   Subscriptions._searchTimer = null;
+  Subscriptions._signupBucketFilters = {
+    'self-serve': true,
+    review: false,
+    manual: false,
+    'paid-risk': false,
+  };
+
+  Subscriptions.SIGNUP_BUCKET_LABELS = {
+    'self-serve': 'Self-serve',
+    review: 'Review',
+    manual: 'Manual',
+    'paid-risk': 'Paid',
+  };
+
+  Subscriptions.SIGNUP_BUCKET_BADGE = {
+    'self-serve': 'text-bg-success',
+    review: 'text-bg-warning',
+    manual: 'text-bg-secondary',
+    'paid-risk': 'text-bg-danger',
+  };
 
   Subscriptions.escapeHtml = function (text) {
     return String(text ?? '')
@@ -48,6 +68,64 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     return '<i class="fa-solid fa-bullseye text-success me-2" title="Positive fixture module"></i>';
   };
 
+  Subscriptions.signupBucketBadgeHtml = function (bucket) {
+    const label = Subscriptions.SIGNUP_BUCKET_LABELS[bucket] || bucket || '—';
+    const cls = Subscriptions.SIGNUP_BUCKET_BADGE[bucket] || 'text-bg-secondary';
+    return `<span class="badge ${cls}">${Subscriptions.escapeHtml(label)}</span>`;
+  };
+
+  Subscriptions.moduleMatchesSignupFilters = function (mod) {
+    const bucket = mod.signup_bucket || 'review';
+    return Boolean(Subscriptions._signupBucketFilters[bucket]);
+  };
+
+  Subscriptions.filteredModules = function (modules) {
+    return (modules || []).filter((mod) => Subscriptions.moduleMatchesSignupFilters(mod));
+  };
+
+  Subscriptions.renderSignupGuide = function (modules) {
+    const tbody = document.getElementById('subscriptions-signup-tbody');
+    const countEl = document.getElementById('subscriptions-signup-count');
+    if (!tbody) return;
+
+    const visible = Subscriptions.filteredModules(modules);
+    if (countEl) {
+      countEl.textContent = `${visible.length} shown · ${modules.length} key-required total`;
+    }
+
+    if (!modules.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="6" class="text-body-secondary small">No key-required modules loaded.</td></tr>';
+      return;
+    }
+
+    if (!visible.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="6" class="text-body-secondary small">No modules match the selected signup buckets.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = visible
+      .map((mod) => {
+        const signupUrl = mod.signup_url || mod.website || '';
+        const signupCell = signupUrl
+          ? `<a class="btn btn-sm btn-outline-primary" href="${Subscriptions.escapeHtml(signupUrl)}" target="_blank" rel="noopener noreferrer">Open</a>`
+          : '—';
+        const keyCell = mod.has_api_key
+          ? '<i class="fa-solid fa-key text-success" title="Configured"></i>'
+          : '<i class="fa-solid fa-key text-warning" title="Missing"></i>';
+        return `<tr data-module-id="${Subscriptions.escapeHtml(mod.module_id)}">
+          <td>${Subscriptions.signupBucketBadgeHtml(mod.signup_bucket)}</td>
+          <td><code class="small">${Subscriptions.escapeHtml(mod.module_id)}</code></td>
+          <td class="small">${Subscriptions.escapeHtml(mod.name)}</td>
+          <td>${keyCell}</td>
+          <td>${signupCell}</td>
+          <td class="small text-body-secondary">${Subscriptions.escapeHtml(mod.signup_note || '')}</td>
+        </tr>`;
+      })
+      .join('');
+  };
+
   Subscriptions.renderSummary = function (modules) {
     const root = document.getElementById('subscriptions-summary');
     if (!root) return;
@@ -71,7 +149,14 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     if (!root) return;
     root.innerHTML = '';
 
-    modules.forEach((mod) => {
+    const visible = Subscriptions.filteredModules(modules);
+    if (!visible.length) {
+      root.innerHTML =
+        '<p class="small text-body-secondary mb-0">No modules match the selected signup buckets.</p>';
+      return;
+    }
+
+    visible.forEach((mod) => {
       const itemId = `subs-mod-${mod.module_id.replace(/[^a-z0-9_-]/gi, '-')}`;
       const item = document.createElement('div');
       item.className = 'accordion-item';
@@ -87,6 +172,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
             <span class="me-2 fw-semibold">${Subscriptions.escapeHtml(mod.module_id)}</span>
             <span class="text-body-secondary small me-2">${Subscriptions.escapeHtml(mod.name)}</span>
             ${Subscriptions.tierBadgeHtml(mod.subscription_tier, mod.has_api_key)}
+            ${Subscriptions.signupBucketBadgeHtml(mod.signup_bucket)}
           </button>
         </h2>
         <div id="${itemId}-body" class="accordion-collapse collapse"
@@ -135,11 +221,23 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     const website = detail.website
       ? `<a href="${Subscriptions.escapeHtml(detail.website)}" target="_blank" rel="noopener noreferrer">${Subscriptions.escapeHtml(detail.website)}</a>`
       : '—';
+    const signupUrl = detail.signup_url || detail.website || '';
+    const signupBtn = signupUrl
+      ? `<a class="btn btn-sm btn-primary me-2" href="${Subscriptions.escapeHtml(signupUrl)}" target="_blank" rel="noopener noreferrer">Open signup page</a>`
+      : '';
+    const signupNote = detail.signup_note
+      ? `<p class="small text-body-secondary mb-3">${Subscriptions.escapeHtml(detail.signup_note)}</p>`
+      : '';
 
     container.innerHTML = `
       <div class="subscriptions-detail" data-module-detail="${detail.module_id}">
         <h3 class="h6">${Subscriptions.escapeHtml(detail.name)}</h3>
-        <p class="small mb-3">${Subscriptions.escapeHtml(detail.summary)}</p>
+        <p class="small mb-2">${Subscriptions.escapeHtml(detail.summary)}</p>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+          ${signupBtn}
+          ${Subscriptions.signupBucketBadgeHtml(detail.signup_bucket)}
+        </div>
+        ${signupNote}
         <dl class="row small mb-3">
           <dt class="col-sm-3">Website</dt>
           <dd class="col-sm-9 mb-1">${website}</dd>
@@ -278,6 +376,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
       const modules = await Connection.fetchJson(path);
       Subscriptions._moduleList = modules;
       Subscriptions.renderSummary(modules);
+      Subscriptions.renderSignupGuide(modules);
       Subscriptions.renderAccordion(modules);
       Subscriptions._loaded = true;
       Subscriptions.setActionButtonsEnabled(Connection.isConnected());
@@ -294,6 +393,22 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
   Subscriptions.setActionButtonsEnabled = function (connected) {
     document.getElementById('subscriptions-search')?.toggleAttribute('disabled', !connected);
     document.getElementById('subscriptions-refresh')?.toggleAttribute('disabled', !connected);
+    document.querySelectorAll('#subscriptions-signup-filters [data-signup-bucket]').forEach((input) => {
+      input.disabled = !connected;
+    });
+  };
+
+  Subscriptions.setSignupBucketFilter = function (bucket, enabled) {
+    if (!Object.prototype.hasOwnProperty.call(Subscriptions._signupBucketFilters, bucket)) return;
+    Subscriptions._signupBucketFilters[bucket] = Boolean(enabled);
+    Subscriptions.renderSignupGuide(Subscriptions._moduleList);
+    Subscriptions.renderAccordion(Subscriptions._moduleList);
+  };
+
+  Subscriptions.syncSignupFilterControls = function () {
+    document.querySelectorAll('#subscriptions-signup-filters [data-signup-bucket]').forEach((input) => {
+      input.checked = Boolean(Subscriptions._signupBucketFilters[input.dataset.signupBucket]);
+    });
   };
 
   Subscriptions.scheduleScrollSync = function () {
@@ -334,6 +449,12 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
       Subscriptions.loadCatalog();
     });
 
+    root.querySelectorAll('#subscriptions-signup-filters [data-signup-bucket]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Subscriptions.setSignupBucketFilter(input.dataset.signupBucket, input.checked);
+      });
+    });
+
     root.querySelector('#subscriptions-search')?.addEventListener('input', (event) => {
       clearTimeout(Subscriptions._searchTimer);
       const query = event.target.value.trim();
@@ -352,6 +473,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     el.dataset.initialized = 'true';
 
     Subscriptions.bindFilters(el);
+    Subscriptions.syncSignupFilterControls();
     Connection.onStatusChange(Subscriptions.onConnectionChange);
     if (Connection.isConnected()) {
       Subscriptions.onConnectionChange(true);
