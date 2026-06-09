@@ -307,21 +307,34 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map.onConnectionChange = function (connected, status) {
-    Map._connected = connected;
-    Map.setControlsEnabled(connected);
+    const serverUp = Boolean(status?.server_reachable ?? connected);
+    const dbReady = Boolean(status?.database_ready);
+    Map._connected = serverUp && dbReady;
+    Map.setControlsEnabled(Map._connected);
     if (status?.inventory) {
       Map.setInventory(status.inventory);
     }
-    if (connected) {
-      Map.setStatus(`TypeDB reachable (${status?.database || 'spiderfeet-map'})`);
-      if (document.getElementById('pane-maps')?.classList.contains('active')) {
-        Map.loadGraph();
-      }
-    } else {
+    if (!status) {
       Map.showEmpty(true);
-      Map.setStatus(
-        status ? 'API reachable but TypeDB is not' : 'Waiting for API connection…'
-      );
+      Map.setStatus('Waiting for API connection…');
+      return;
+    }
+    if (!serverUp) {
+      Map.showEmpty(true);
+      Map.setStatus('TypeDB server unreachable — check server and .config/typedb.connection.json');
+      return;
+    }
+    if (status.bootstrapped) {
+      Map.setStatus(`Recreated map database ${status.database} — loading graph…`);
+    } else if (dbReady) {
+      Map.setStatus(`Map database ready (${status.database})`);
+    } else {
+      Map.setStatus(`TypeDB server OK but map database ${status.database} is not ready`);
+    }
+    if (Map._connected && document.getElementById('pane-maps')?.classList.contains('active')) {
+      Map.loadGraph();
+    } else if (!dbReady) {
+      Map.showEmpty(true);
     }
   };
 

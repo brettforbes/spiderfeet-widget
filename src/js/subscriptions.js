@@ -41,6 +41,13 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     return '<i class="fa-solid fa-key text-warning me-2" title="API key missing"></i>';
   };
 
+  Subscriptions.fixtureCategoryIconHtml = function (fixtureCategory) {
+    if (fixtureCategory === 'negative') {
+      return '<i class="fa-solid fa-filter-circle-xmark text-secondary me-2" title="Negative fixture module"></i>';
+    }
+    return '<i class="fa-solid fa-bullseye text-success me-2" title="Positive fixture module"></i>';
+  };
+
   Subscriptions.renderSummary = function (modules) {
     const root = document.getElementById('subscriptions-summary');
     if (!root) return;
@@ -75,6 +82,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
             data-bs-toggle="collapse" data-bs-target="#${itemId}-body"
             aria-expanded="false" aria-controls="${itemId}-body"
             data-module-id="${mod.module_id}">
+            ${Subscriptions.fixtureCategoryIconHtml(mod.fixture_category || 'positive')}
             ${Subscriptions.keyIconHtml(mod.has_api_key)}
             <span class="me-2 fw-semibold">${Subscriptions.escapeHtml(mod.module_id)}</span>
             <span class="text-body-secondary small me-2">${Subscriptions.escapeHtml(mod.name)}</span>

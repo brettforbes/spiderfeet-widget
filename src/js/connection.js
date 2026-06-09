@@ -73,11 +73,17 @@ window.Widgets.Connection = window.Widgets.Connection || {};
     Connection.setConnectionBadge('Checking…', 'secondary');
     try {
       const status = await Connection.fetchJson('/map/status');
-      Connection._connected = Boolean(status.reachable);
-      if (status.reachable) {
-        Connection.setConnectionBadge(`Connected · ${status.database}`, 'success');
+      const serverUp = Boolean(status.server_reachable ?? status.reachable);
+      Connection._connected = serverUp;
+      Connection._databaseReady = Boolean(status.database_ready);
+      if (!serverUp) {
+        Connection.setConnectionBadge('TypeDB server unreachable', 'warning');
+      } else if (status.bootstrapped) {
+        Connection.setConnectionBadge(`Map DB recreated · ${status.database}`, 'info');
+      } else if (status.database_ready) {
+        Connection.setConnectionBadge(`TypeDB · ${status.database}`, 'success');
       } else {
-        Connection.setConnectionBadge('Unreachable', 'warning');
+        Connection.setConnectionBadge(`TypeDB up · map DB not ready`, 'warning');
       }
       Connection._lastStatus = status;
       Connection._notify();
