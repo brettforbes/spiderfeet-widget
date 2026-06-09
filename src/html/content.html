@@ -1,53 +1,483 @@
-<h2>Page Content</h2>
+<div
+  class="container-fluid vh-100 d-flex flex-column p-0"
+  data-bs-theme="light"
+  id="widget-root"
+  data-api-base="http://127.0.0.1:8001/api/v1"
+>
+  <header class="border-bottom bg-body-tertiary">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
+      <div class="container-fluid p-0">
+        <a class="navbar-brand me-3 py-0" href="#">
+          <img
+            src="logos/spiderfeet_logo_horizontal_dark.svg"
+            alt="SpiderFeet"
+            class="navbar-brand-logo"
+            width="336"
+            height="64"
+          />
+        </a>
 
+        <ul class="navbar-nav flex-row gap-1 me-auto" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 2 — not yet implemented"
+            >
+              Enrichments
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 2 — not yet implemented"
+            >
+              Composer
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link active text-white px-2 py-1"
+              type="button"
+              data-shell-tab="maps"
+              aria-current="page"
+            >
+              Maps
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              disabled
+              title="Stage 5 — not yet implemented"
+            >
+              Logs
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              data-shell-tab="subscriptions"
+            >
+              Subscriptions
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              data-shell-tab="tests"
+            >
+              Tests
+            </button>
+          </li>
+        </ul>
 
-<h3>Get message from parent:</h3>
+        <div
+          class="d-flex align-items-center gap-2"
+          data-widget="map-connection"
+          id="map-connection"
+        >
+          <span
+            class="badge rounded-pill text-bg-secondary"
+            id="connection-badge"
+            aria-live="polite"
+          >
+            Checking…
+          </span>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-light"
+            data-action="ping"
+            aria-label="Test TypeDB connection"
+          >
+            Ping
+          </button>
+        </div>
+      </div>
+    </nav>
+  </header>
 
-<div>
-    <div id="message">Please send some message from the input above.</div>
-    <script>
-      window.addEventListener("message", function (event) {
-        console.log(["github receive",event]);
-        document.querySelector("#message").innerText =
-          typeof event.data === "string"
-            ? event.data
-            : JSON.stringify(event.data);
-      });
-    </script>
-</div>
+  <div class="tab-content flex-grow-1 overflow-hidden d-flex flex-column">
+    <div
+      class="tab-pane fade show active flex-grow-1 d-flex flex-column overflow-hidden"
+      id="pane-maps"
+      role="tabpanel"
+      data-shell-pane="maps"
+      data-widget="maps-panel"
+    >
+      <div class="row g-0 flex-grow-1 overflow-hidden h-100">
+        <aside
+          class="col-12 col-md-3 border-end overflow-auto p-3 bg-body"
+          id="map-sidebar"
+          aria-label="Map filters and inventory"
+        >
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Inventory</h2>
+          <dl class="row small mb-4" id="map-inventory">
+            <dt class="col-7">Nuggets</dt>
+            <dd class="col-5 text-end mb-1" data-count="nuggets">—</dd>
+            <dt class="col-7">OSINT services</dt>
+            <dd class="col-5 text-end mb-1" data-count="services">—</dd>
+            <dt class="col-7">Links</dt>
+            <dd class="col-5 text-end mb-1" data-count="links">—</dd>
+          </dl>
 
-<h3>Raise event to parent:</h3>
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Layout</h2>
+          <div
+            class="btn-group-vertical w-100 mb-3"
+            role="group"
+            aria-label="Force layout variant"
+            id="map-layout-buttons"
+          >
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="default"
+              aria-pressed="true"
+              disabled
+            >
+              Default
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="sparse"
+              aria-pressed="false"
+              disabled
+            >
+              Sparse
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="grouped"
+              aria-pressed="false"
+              disabled
+            >
+              Grouped
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-variant="dense"
+              aria-pressed="false"
+              disabled
+            >
+              Dense
+            </button>
+          </div>
 
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Nodes</h2>
+          <div
+            class="btn-group-vertical w-100 mb-3"
+            role="group"
+            aria-label="Node display mode"
+            id="map-node-display-buttons"
+          >
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-node-display="circles"
+              aria-pressed="true"
+              disabled
+            >
+              Circles
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm text-start"
+              data-node-display="icons"
+              aria-pressed="false"
+              disabled
+            >
+              Icons
+            </button>
+          </div>
 
-<div>
-    <label for="messageText">Message:</label><br/>
-    <input style="margin-top: 1em" type="text" id="messageText" /><br/><br/>
-    <button id="sendMessage">Send Message to Parent</button><br/><br/>
-    <script>
-        // if messageText has user input and it has not be auto filled, then mark field as dirty
-        var messageText = document.querySelector("#messageText");
-        messageText.addEventListener("input", function () {
-            if (messageText.value !== "") {
-                messageText.classList.add("dirty");
-            }
-        });
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-2"
+            data-action="refresh-graph"
+            disabled
+          >
+            Refresh graph
+          </button>
+          <p class="small text-body-secondary mb-0" id="map-sidebar-hint">
+            Connect to the SpiderFeet API and ensure TypeDB is running.
+          </p>
+        </aside>
 
-        var button = document.querySelector("#sendMessage");
-        button.addEventListener("click", function () {
-            var message = document.querySelector("#messageText").value;
-            // does messageText have class dirty? if not, then auto fill it
-            if (document.querySelector("#messageText").classList.contains("dirty") === false) {
-                message = "";
-            }
+        <main class="col-12 col-md-9 d-flex flex-column overflow-hidden p-0 position-relative h-100">
+          <div id="viz-stage" class="flex-grow-1 position-relative bg-body-secondary overflow-hidden">
+            <div
+              id="viz-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+              aria-hidden="true"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading graph</span>
+              </div>
+            </div>
 
-            if (message === "") {
-                messageText.classList.remove("dirty");
-                message = "Hello from iframe! " + Math.random() + " " + new Date().toISOString();
-                document.querySelector("#messageText").value = message;
-            }
-            console.log(["github send",event]);
-            window.parent.postMessage(message, "*");
-        });
-    </script>
-    <button class="btn btn-primary" data-type="customevent">Raise Event</button><br/>
+            <div
+              id="viz-empty"
+              class="position-absolute top-50 start-50 translate-middle text-center px-3 d-none"
+            >
+              <p class="text-body-secondary mb-2">No graph data yet.</p>
+              <button type="button" class="btn btn-sm btn-primary" data-action="refresh-graph">
+                Load graph
+              </button>
+            </div>
+
+            <svg
+              id="graph"
+              class="viz-layer w-100 h-100"
+              role="img"
+              aria-label="OSINT map force graph"
+            ></svg>
+
+            <div
+              id="tooltip"
+              class="viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+              hidden
+            ></div>
+
+            <div
+              class="position-absolute bottom-0 end-0 m-3 p-2 border rounded bg-body small shadow-sm"
+              id="map-legend"
+              aria-label="Graph legend"
+            ></div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary d-flex justify-content-between"
+            id="map-status"
+            aria-live="polite"
+          >
+            <span id="map-status-text">Ready</span>
+            <span id="map-node-count"></span>
+          </footer>
+        </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-tests"
+      role="tabpanel"
+      data-shell-pane="tests"
+      data-widget="tests-panel"
+    >
+      <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Test filters">
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
+          <div class="mb-3">
+            <label for="tests-search" class="form-label small">Search modules</label>
+            <input
+              type="search"
+              class="form-control form-control-sm"
+              id="tests-search"
+              placeholder="e.g. dnsresolve"
+              disabled
+            />
+          </div>
+          <div class="mb-3">
+            <label for="tests-timeout" class="form-label small">Scan timeout</label>
+            <select class="form-select form-select-sm" id="tests-timeout" disabled>
+              <option value="30">30 seconds</option>
+              <option value="60">60 seconds</option>
+              <option value="120" selected>120 seconds (default)</option>
+              <option value="180">180 seconds</option>
+              <option value="300">300 seconds</option>
+              <option value="600">600 seconds</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-2"
+            id="tests-refresh"
+            disabled
+          >
+            Refresh catalog
+          </button>
+          <button
+            type="button"
+            class="btn btn-outline-primary btn-sm w-100 mb-2"
+            id="tests-run-all"
+            disabled
+            title="Run seed-validated tests only (configure keys in Subscriptions for auth modules)"
+          >
+            Run validated tests
+          </button>
+          <div class="form-check form-check-sm mb-2">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="tests-run-unvalidated"
+              disabled
+            />
+            <label class="form-check-label small" for="tests-run-unvalidated">
+              Include pending-seed tests (unvalidated inputs)
+            </label>
+          </div>
+          <button
+            type="button"
+            class="btn btn-outline-danger btn-sm w-100 mb-2 d-none"
+            id="tests-run-all-stop"
+          >
+            Stop batch
+          </button>
+          <div id="tests-global-progress-wrap" class="mb-2 d-none" aria-live="polite">
+            <div class="d-flex justify-content-between small text-body-secondary mb-1">
+              <span>Overall batch</span>
+              <span id="tests-global-progress-count">0 / 0</span>
+            </div>
+            <div class="progress tests-progress-global" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+              <div id="tests-global-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"></div>
+            </div>
+          </div>
+          <div id="tests-module-progress-list" class="mb-3"></div>
+          <p class="small text-body-secondary mb-0">
+            Expand a module for exploratory tests (one per consumed nugget). The input value
+            column shows the scan target that will be sent. Outcomes are discovered at run time.
+          </p>
+        </aside>
+
+        <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden tests-main">
+          <div class="p-3 border-bottom bg-body flex-shrink-0">
+            <h2 class="h6 text-uppercase text-body-secondary mb-2">Coverage summary</h2>
+            <dl class="row small mb-0" id="tests-summary">
+              <dt class="col-6 col-lg-3">Modules</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="modules">—</dd>
+              <dt class="col-6 col-lg-3">Tests</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="tests">—</dd>
+              <dt class="col-6 col-lg-3">Groups</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="groups">—</dd>
+              <dt class="col-6 col-lg-3">Not started</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="not-started">—</dd>
+              <dt class="col-6 col-lg-3">In test</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="in-test">—</dd>
+              <dt class="col-6 col-lg-3">Tested</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="tested">—</dd>
+              <dt class="col-6 col-lg-3">Passed (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="passed">0</dd>
+              <dt class="col-6 col-lg-3">Failed (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="failed">0</dd>
+              <dt class="col-6 col-lg-3">Skipped (session)</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="skipped">0</dd>
+              <dt class="col-6 col-lg-3">Needs API key</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="needs-key">—</dd>
+              <dt class="col-6 col-lg-3">Seed validated</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="seed-validated">—</dd>
+              <dt class="col-6 col-lg-3">Pending seed</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="pending-seed">—</dd>
+              <dt class="col-6 col-lg-3">Runnable now</dt>
+              <dd class="col-6 col-lg-3 mb-1" data-count="runnable">—</dd>
+            </dl>
+          </div>
+
+          <div class="flex-grow-1 overflow-auto position-relative p-3" id="tests-scroll-region">
+            <div
+              id="tests-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading tests catalog</span>
+              </div>
+            </div>
+
+            <div class="accordion" id="tests-module-accordion"></div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+            id="tests-status"
+            aria-live="polite"
+          >
+            <span id="tests-status-text">Connect to the API to load the test catalog.</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-subscriptions"
+      role="tabpanel"
+      data-shell-pane="subscriptions"
+      data-widget="subscriptions-panel"
+    >
+      <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Subscription filters">
+          <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
+          <div class="mb-3">
+            <label for="subscriptions-search" class="form-label small">Search modules</label>
+            <input
+              type="search"
+              class="form-control form-control-sm"
+              id="subscriptions-search"
+              placeholder="e.g. emailrep"
+              disabled
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm w-100 mb-2"
+            id="subscriptions-refresh"
+            disabled
+          >
+            Refresh list
+          </button>
+          <p class="small text-body-secondary mb-0">
+            Configure API keys for OSINT services that require authentication. Saved keys unlock
+            matching modules in the Tests tab.
+          </p>
+        </aside>
+
+        <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden subscriptions-main">
+          <div class="p-3 border-bottom bg-body flex-shrink-0">
+            <h2 class="h6 text-uppercase text-body-secondary mb-2">Subscription summary</h2>
+            <dl class="row small mb-0" id="subscriptions-summary">
+              <dt class="col-6 col-lg-4">Key-required modules</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="total">—</dd>
+              <dt class="col-6 col-lg-4">Configured</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="configured">—</dd>
+              <dt class="col-6 col-lg-4">Missing keys</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="missing">—</dd>
+              <dt class="col-6 col-lg-4">Free tier</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="free-tier">—</dd>
+              <dt class="col-6 col-lg-4">Paid tier</dt>
+              <dd class="col-6 col-lg-2 mb-1" data-count="paid-tier">—</dd>
+            </dl>
+          </div>
+
+          <div class="flex-grow-1 overflow-auto position-relative p-3" id="subscriptions-scroll-region">
+            <div
+              id="subscriptions-spinner"
+              class="position-absolute top-50 start-50 translate-middle d-none"
+            >
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading subscriptions</span>
+              </div>
+            </div>
+
+            <div class="accordion" id="subscriptions-module-accordion"></div>
+          </div>
+
+          <footer
+            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+            id="subscriptions-status"
+            aria-live="polite"
+          >
+            <span id="subscriptions-status-text">Connect to the API to load subscriptions.</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+  </div>
 </div>

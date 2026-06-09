@@ -6,10 +6,23 @@
 
 // Customize Bootstrap variables here if needed
 $body-bg: #f8f9fa;
+$navbar-brand-font-size: 1.125rem;
 
 // Import Bootstrap's main SCSS file
 @import 'bootstrap/scss/bootstrap';
 
-.test {
-    background-color: red;
+body {
+  overflow: hidden;
+}
+
+.navbar-brand {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.navbar-brand-logo {
+  display: block;
+  height: 4rem;
+  width: auto;
+  max-width: 21rem;
 }

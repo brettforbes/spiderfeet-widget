@@ -134,9 +134,18 @@ module.exports = {
                 'node_modules/bootstrap/dist/css/bootstrap.css',
                 'node_modules/@fortawesome/fontawesome-free/css/all.min.css'
             ],
-            //create one file for all widget js
+            //create one file for all widget js (explicit order — globs can miss files on dev rebuild)
             "widget.js": [
-                paths.src + '/js/**/*.js',
+                paths.src + '/js/_namespace.js',
+                paths.src + '/js/#events.js',
+                paths.src + '/js/connection.js',
+                paths.src + '/js/shell.js',
+                paths.src + '/js/viz.core.js',
+                paths.src + '/js/viz.force.js',
+                paths.src + '/js/map.js',
+                paths.src + '/js/subscriptions.js',
+                paths.src + '/js/tests.js',
+                paths.src + '/js/app.js',
             ],
             "widget.css": [
                 paths.src + '/css/**/*.css',
