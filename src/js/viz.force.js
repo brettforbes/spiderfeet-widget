@@ -115,7 +115,10 @@
         const hitR = size / 2;
         const isService = d.group === 'service';
         if (isService) {
-          const ringColour = d.fixtureColour || d.colour || '#57534E';
+          const quarantineRing = Boolean(d.originRing);
+          const ringColour = quarantineRing
+            ? d.originColour || '#7C3AED'
+            : d.fixtureColour || d.colour || '#57534E';
           const ringPad = 4;
           group
             .append('circle')
@@ -124,6 +127,7 @@
             .attr('fill', '#ffffff')
             .attr('stroke', ringColour)
             .attr('stroke-width', 3)
+            .attr('stroke-dasharray', quarantineRing ? '5 3' : null)
             .attr('pointer-events', 'none');
         } else {
           group
@@ -169,9 +173,14 @@
         .attr('r', d.r || 8)
         .attr('fill', nodeFill(d, colour));
       if (d.group === 'service') {
+        const quarantineRing = Boolean(d.originRing);
+        const ringColour = quarantineRing
+          ? d.originColour || '#7C3AED'
+          : d.fixtureColour || d.colour || '#57534E';
         circle
-          .attr('stroke', d.fixtureColour || d.colour || '#57534E')
-          .attr('stroke-width', 2.5);
+          .attr('stroke', ringColour)
+          .attr('stroke-width', 2.5)
+          .attr('stroke-dasharray', quarantineRing ? '5 3' : null);
       }
     });
   }
@@ -267,6 +276,7 @@
               `<strong>${d.label || d.id}</strong>`,
               `kind: ${d.group}`,
               meta.fixture_category ? `fixture: ${meta.fixture_category}` : null,
+              meta.service_origin ? `origin: ${meta.service_origin}` : null,
               meta.service_state ? `state: ${meta.service_state}` : null,
             ]
               .filter(Boolean)

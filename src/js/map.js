@@ -8,6 +8,7 @@ window.Widgets.Map = window.Widgets.Map || {};
   /** Distinct from nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
   Map.FIXTURE_POSITIVE_COLOUR = '#57534E';
   Map.FIXTURE_NEGATIVE_COLOUR = '#991B1B';
+  Map.QUARANTINE_ORIGIN_COLOUR = '#7C3AED';
   Map.NUGGET_FALLBACK = '#3b82f6';
   Map.SERVICE_ICON = 'icon_software_used.svg';
   Map.ICON_BASE = 'icons/';
@@ -15,6 +16,10 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map.FIXTURE_LEGEND = [
     { category: 'positive', label: 'Positive fixture', colour: Map.FIXTURE_POSITIVE_COLOUR },
     { category: 'negative', label: 'Negative fixture', colour: Map.FIXTURE_NEGATIVE_COLOUR },
+  ];
+
+  Map.ORIGIN_LEGEND = [
+    { origin: 'quarantine', label: 'Quarantine / local (dashed ring)', colour: Map.QUARANTINE_ORIGIN_COLOUR },
   ];
 
   /** Nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
@@ -39,6 +44,7 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map._lastGraphPayload = null;
   Map._graphTotals = null;
   Map._fixtureFilters = { positive: true, negative: true };
+  Map._originFilters = { external: true, quarantine: true };
   Map._serviceStateFilters = {
     'passes-tests': true,
     'needs-subscription': false,
@@ -122,6 +128,9 @@ window.Widgets.Map = window.Widgets.Map || {};
     document.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
       input.disabled = !enabled;
     });
+    document.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.disabled = !enabled;
+    });
     document.querySelectorAll('#map-service-state-filters [data-service-state-filter]').forEach((input) => {
       input.disabled = !enabled;
     });
@@ -157,11 +166,21 @@ window.Widgets.Map = window.Widgets.Map || {};
     return Boolean(Map._fixtureFilters[category]);
   };
 
+  Map.serviceOriginFor = function (node) {
+    const origin = String(node.service_origin || 'external').toLowerCase();
+    return origin === 'quarantine' ? 'quarantine' : 'external';
+  };
+
+  Map.originMatchesFilters = function (node) {
+    return Boolean(Map._originFilters[Map.serviceOriginFor(node)]);
+  };
+
   Map.applyGraphFilters = function (payload) {
     const visibleServices = new Set();
     (payload.nodes || []).forEach((node) => {
       if (node.kind !== 'osint-service') return;
       if (!Map.fixtureMatchesFilters(node)) return;
+      if (!Map.originMatchesFilters(node)) return;
       if (!Map.serviceMatchesFilters(node)) return;
       visibleServices.add(node.id);
     });
@@ -220,6 +239,9 @@ window.Widgets.Map = window.Widgets.Map || {};
       if (Map.isRemoteIcon(node.fav_icon)) {
         return node.fav_icon;
       }
+      if (node.fav_icon) {
+        return Map.iconUrl(String(node.fav_icon).replace(/^icons\//, ''));
+      }
       return Map.iconUrl(Map.SERVICE_ICON);
     }
     return Map.iconUrl(Map.nuggetIconFilename(node));
@@ -257,6 +279,18 @@ window.Widgets.Map = window.Widgets.Map || {};
       rows.push(Map.legendRow(Map.fixtureLegendSwatch(entry, mode), entry.label));
     });
 
+    if (mode === 'icons') {
+      rows.push('<div class="legend-section-label">Service origin</div>');
+      Map.ORIGIN_LEGEND.forEach((entry) => {
+        rows.push(
+          Map.legendRow(
+            `<span class="legend-swatch legend-swatch-ring legend-swatch-origin-quarantine" style="--swatch-colour:${entry.colour}"></span>`,
+            entry.label
+          )
+        );
+      });
+    }
+
     rows.push('<div class="legend-section-label">Nugget types</div>');
     Map.NUGGET_TYPE_LEGEND.forEach((entry) => {
       rows.push(
@@ -287,6 +321,8 @@ window.Widgets.Map = window.Widgets.Map || {};
       const nuggetIcon = Map.nuggetIconFilename(n);
       const fixtureCategory = isService ? Map.fixtureCategoryForService(n) : null;
       const serviceColour = isService ? Map.serviceColour(fixtureCategory) : null;
+      const serviceOrigin = isService ? Map.serviceOriginFor(n) : null;
+      const isQuarantine = serviceOrigin === 'quarantine';
       return {
         id: n.id,
         group: isService ? 'service' : 'nugget',
@@ -297,9 +333,12 @@ window.Widgets.Map = window.Widgets.Map || {};
         iconFallbackUrl: isService ? Map.iconUrl(Map.SERVICE_ICON) : null,
         colour: isService ? serviceColour : n.colour || Map.NUGGET_FALLBACK,
         fixtureColour: serviceColour,
+        originRing: isQuarantine,
+        originColour: Map.QUARANTINE_ORIGIN_COLOUR,
         meta: {
           service_state: n.service_state,
           fixture_category: fixtureCategory,
+          service_origin: serviceOrigin,
           kind: n.kind,
           icon: isService ? n.fav_icon : nuggetIcon,
         },
@@ -451,6 +490,14 @@ window.Widgets.Map = window.Widgets.Map || {};
     }
   };
 
+  Map.setOriginFilter = function (origin, enabled) {
+    if (origin !== 'external' && origin !== 'quarantine') return;
+    Map._originFilters[origin] = Boolean(enabled);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
   Map.setServiceStateFilter = function (bucket, enabled) {
     if (!Object.prototype.hasOwnProperty.call(Map._serviceStateFilters, bucket)) return;
     Map._serviceStateFilters[bucket] = Boolean(enabled);
@@ -462,6 +509,9 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map.syncFilterControls = function () {
     document.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
       input.checked = Boolean(Map._fixtureFilters[input.dataset.fixtureFilter]);
+    });
+    document.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.checked = Boolean(Map._originFilters[input.dataset.originFilter]);
     });
     document.querySelectorAll('#map-service-state-filters [data-service-state-filter]').forEach((input) => {
       input.checked = Boolean(Map._serviceStateFilters[input.dataset.serviceStateFilter]);
@@ -520,6 +570,12 @@ window.Widgets.Map = window.Widgets.Map || {};
     el.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
       input.addEventListener('change', () => {
         Map.setFixtureFilter(input.dataset.fixtureFilter, input.checked);
+      });
+    });
+
+    el.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Map.setOriginFilter(input.dataset.originFilter, input.checked);
       });
     });
 

@@ -175,6 +175,52 @@
             </p>
           </div>
 
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Service origin</h2>
+          <div
+            class="mb-3"
+            id="map-origin-filters"
+            role="group"
+            aria-label="Service origin filters"
+          >
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-origin-external"
+                data-origin-filter="external"
+                checked
+                disabled
+              />
+              <label
+                class="form-check-label d-flex align-items-center gap-2"
+                for="map-filter-origin-external"
+              >
+                <span class="map-origin-swatch map-origin-swatch-external" aria-hidden="true"></span>
+                External API
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-origin-quarantine"
+                data-origin-filter="quarantine"
+                checked
+                disabled
+              />
+              <label
+                class="form-check-label d-flex align-items-center gap-2"
+                for="map-filter-origin-quarantine"
+              >
+                <span class="map-origin-swatch map-origin-swatch-quarantine" aria-hidden="true"></span>
+                Quarantine / local
+              </label>
+            </div>
+            <p class="small text-body-secondary mb-0 mt-1">
+              Quarantine services use a dashed violet ring in icon mode.
+            </p>
+          </div>
+
           <h2 class="h6 text-uppercase text-body-secondary mb-2">Service status</h2>
           <div
             class="mb-3"
