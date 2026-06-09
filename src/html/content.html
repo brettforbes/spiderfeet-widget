@@ -117,15 +117,118 @@
           id="map-sidebar"
           aria-label="Map filters and inventory"
         >
-          <h2 class="h6 text-uppercase text-body-secondary mb-3">Inventory</h2>
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Inventory</h2>
+          <div class="row small text-body-secondary mb-1" id="map-inventory-header">
+            <span class="col-5"></span>
+            <span class="col-3 text-end">Total</span>
+            <span class="col-4 text-end">On screen</span>
+          </div>
           <dl class="row small mb-4" id="map-inventory">
-            <dt class="col-7">Nuggets</dt>
-            <dd class="col-5 text-end mb-1" data-count="nuggets">—</dd>
-            <dt class="col-7">OSINT services</dt>
-            <dd class="col-5 text-end mb-1" data-count="services">—</dd>
-            <dt class="col-7">Links</dt>
-            <dd class="col-5 text-end mb-1" data-count="links">—</dd>
+            <dt class="col-5">Nuggets</dt>
+            <dd class="col-3 text-end mb-1" data-count="nuggets-total">—</dd>
+            <dd class="col-4 text-end mb-1" data-count="nuggets-visible">—</dd>
+            <dt class="col-5">OSINT services</dt>
+            <dd class="col-3 text-end mb-1" data-count="services-total">—</dd>
+            <dd class="col-4 text-end mb-1" data-count="services-visible">—</dd>
+            <dt class="col-5">Links</dt>
+            <dd class="col-3 text-end mb-1" data-count="links-total">—</dd>
+            <dd class="col-4 text-end mb-1" data-count="links-visible">—</dd>
           </dl>
+
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Fixtures</h2>
+          <div
+            class="mb-3"
+            id="map-fixture-filters"
+            role="group"
+            aria-label="Fixture category filters"
+          >
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-positive"
+                data-fixture-filter="positive"
+                checked
+                disabled
+              />
+              <label class="form-check-label d-flex align-items-center gap-2" for="map-filter-positive">
+                <span class="map-fixture-swatch map-fixture-swatch-positive" aria-hidden="true"></span>
+                Positive fixtures
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-negative"
+                data-fixture-filter="negative"
+                checked
+                disabled
+              />
+              <label class="form-check-label d-flex align-items-center gap-2" for="map-filter-negative">
+                <span class="map-fixture-swatch map-fixture-swatch-negative" aria-hidden="true"></span>
+                Negative fixtures
+              </label>
+            </div>
+            <p class="small text-body-secondary mb-0 mt-1">
+              Linked nuggets hide when their fixture is filtered out.
+            </p>
+          </div>
+
+          <h2 class="h6 text-uppercase text-body-secondary mb-2">Service status</h2>
+          <div
+            class="mb-3"
+            id="map-service-state-filters"
+            role="group"
+            aria-label="Service status filters"
+          >
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-passes-tests"
+                data-service-state-filter="passes-tests"
+                checked
+                disabled
+              />
+              <label class="form-check-label d-flex align-items-center gap-2" for="map-filter-passes-tests">
+                <span class="map-status-swatch map-status-swatch-passes" aria-hidden="true"></span>
+                Passes tests
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-needs-subscription"
+                data-service-state-filter="needs-subscription"
+                disabled
+              />
+              <label
+                class="form-check-label d-flex align-items-center gap-2"
+                for="map-filter-needs-subscription"
+              >
+                <span class="map-status-swatch map-status-swatch-subscription" aria-hidden="true"></span>
+                Needs subscription
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="map-filter-error"
+                data-service-state-filter="error"
+                disabled
+              />
+              <label class="form-check-label d-flex align-items-center gap-2" for="map-filter-error">
+                <span class="map-status-swatch map-status-swatch-error" aria-hidden="true"></span>
+                Error
+              </label>
+            </div>
+            <p class="small text-body-secondary mb-0 mt-1">
+              Open runnable modules by default; enable subscription or error to include those services.
+            </p>
+          </div>
 
           <h2 class="h6 text-uppercase text-body-secondary mb-2">Layout</h2>
           <div
@@ -433,9 +536,39 @@
           >
             Refresh list
           </button>
+          <h2 class="h6 text-uppercase text-body-secondary mb-2 mt-3">Signup checklist</h2>
+          <div class="mb-2" id="subscriptions-signup-filters" role="group" aria-label="Signup bucket filters">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-self-serve" data-signup-bucket="self-serve" checked disabled />
+              <label class="form-check-label small" for="subs-filter-self-serve">Self-serve (start here)</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-review" data-signup-bucket="review" disabled />
+              <label class="form-check-label small" for="subs-filter-review">Review on site</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-manual" data-signup-bucket="manual" disabled />
+              <label class="form-check-label small" for="subs-filter-manual">Manual / slow approval</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-paid-risk" data-signup-bucket="paid-risk" disabled />
+              <label class="form-check-label small" for="subs-filter-paid-risk">Paid tier (skip for card-free)</label>
+            </div>
+          </div>
+          <p class="small text-body-secondary mb-2" id="subscriptions-signup-hint">
+            Open provider signups from the checklist below. Confirm each site is still free with no credit card.
+          </p>
+          <a
+            class="btn btn-outline-secondary btn-sm w-100 mb-2"
+            id="subscriptions-open-static-guide"
+            href="free_auth_api_key_signup.html"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open full signup table
+          </a>
           <p class="small text-body-secondary mb-0">
-            Configure API keys for OSINT services that require authentication. Saved keys unlock
-            matching modules in the Tests tab.
+            Configure API keys below each module. Saved keys unlock matching modules in the Tests tab.
           </p>
         </aside>
 
@@ -466,6 +599,33 @@
               </div>
             </div>
 
+            <section class="mb-4" id="subscriptions-signup-guide" aria-label="API key signup checklist">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <h2 class="h6 text-uppercase text-body-secondary mb-0">Signup checklist</h2>
+                <span class="small text-body-secondary" id="subscriptions-signup-count"></span>
+              </div>
+              <div class="table-responsive subscriptions-signup-table-wrap">
+                <table class="table table-sm table-striped align-middle mb-0" id="subscriptions-signup-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Bucket</th>
+                      <th scope="col">Module</th>
+                      <th scope="col">Provider</th>
+                      <th scope="col">Key</th>
+                      <th scope="col">Signup</th>
+                      <th scope="col">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody id="subscriptions-signup-tbody">
+                    <tr>
+                      <td colspan="6" class="text-body-secondary small">Connect to the API to load signup links.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <h2 class="h6 text-uppercase text-body-secondary mb-2">Configure keys</h2>
             <div class="accordion" id="subscriptions-module-accordion"></div>
           </div>
 

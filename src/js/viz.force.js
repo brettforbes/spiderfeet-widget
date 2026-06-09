@@ -114,7 +114,18 @@
         const size = d.iconSize || 28;
         const hitR = size / 2;
         const isService = d.group === 'service';
-        if (!isService) {
+        if (isService) {
+          const ringColour = d.fixtureColour || d.colour || '#57534E';
+          const ringPad = 4;
+          group
+            .append('circle')
+            .attr('class', 'node-icon-ring')
+            .attr('r', hitR + ringPad)
+            .attr('fill', '#ffffff')
+            .attr('stroke', ringColour)
+            .attr('stroke-width', 3)
+            .attr('pointer-events', 'none');
+        } else {
           group
             .append('rect')
             .attr('class', 'node-icon-bg')
@@ -129,7 +140,7 @@
         group
           .append('circle')
           .attr('class', 'node-hit')
-          .attr('r', hitR)
+          .attr('r', isService ? hitR + 4 : hitR)
           .attr('fill', 'rgba(0,0,0,0.001)')
           .attr('stroke', 'none');
         const image = group
@@ -152,11 +163,16 @@
         return;
       }
 
-      group
+      const circle = group
         .append('circle')
         .attr('class', 'node-circle node-hit')
         .attr('r', d.r || 8)
         .attr('fill', nodeFill(d, colour));
+      if (d.group === 'service') {
+        circle
+          .attr('stroke', d.fixtureColour || d.colour || '#57534E')
+          .attr('stroke-width', 2.5);
+      }
     });
   }
 
@@ -250,6 +266,7 @@
             tooltipEl.innerHTML = [
               `<strong>${d.label || d.id}</strong>`,
               `kind: ${d.group}`,
+              meta.fixture_category ? `fixture: ${meta.fixture_category}` : null,
               meta.service_state ? `state: ${meta.service_state}` : null,
             ]
               .filter(Boolean)
