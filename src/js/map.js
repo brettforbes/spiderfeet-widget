@@ -19,7 +19,13 @@ window.Widgets.Map = window.Widgets.Map || {};
   ];
 
   Map.ORIGIN_LEGEND = [
-    { origin: 'quarantine', label: 'Quarantine / local (dashed ring)', colour: Map.QUARANTINE_ORIGIN_COLOUR },
+    { origin: 'external-api', label: 'External API', colour: Map.FIXTURE_POSITIVE_COLOUR },
+    { origin: 'cli', label: 'CLI', colour: '#0d9488' },
+    { origin: 'local', label: 'Local', colour: '#6366f1' },
+  ];
+
+  Map.STATE_LEGEND = [
+    { state: 'quarantine', label: 'Quarantine (dashed ring)', colour: Map.QUARANTINE_ORIGIN_COLOUR },
   ];
 
   /** Nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
@@ -44,12 +50,14 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map._lastGraphPayload = null;
   Map._graphTotals = null;
   Map._fixtureFilters = { positive: true, negative: true };
-  Map._originFilters = { external: true, quarantine: true };
+  Map._originFilters = { 'external-api': true, cli: true, local: true };
   Map._serviceStateFilters = {
+    quarantine: true,
     'passes-tests': true,
     'needs-subscription': false,
     error: false,
   };
+  Map._filterPanelOpen = false;
 
   Map.iconUrl = function (filename) {
     if (!filename) return '';
@@ -152,6 +160,7 @@ window.Widgets.Map = window.Widgets.Map || {};
     if (node.kind !== 'osint-service') return null;
     const state = String(node.service_state || 'in-test').toLowerCase();
     if (state === 'error') return 'error';
+    if (state === 'quarantine') return 'quarantine';
     if (node.requires_api_key) return 'needs-subscription';
     return 'passes-tests';
   };
@@ -167,8 +176,36 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map.serviceOriginFor = function (node) {
-    const origin = String(node.service_origin || 'external').toLowerCase();
-    return origin === 'quarantine' ? 'quarantine' : 'external';
+    const origin = String(node.service_origin || 'external-api').toLowerCase();
+    if (origin === 'external-api' || origin === 'cli' || origin === 'local') {
+      return origin;
+    }
+    if (origin === 'external' || origin === 'custom') {
+      return 'external-api';
+    }
+    if (origin === 'quarantine') {
+      return String(node.id || '').startsWith('sfp_tool_') ? 'cli' : 'local';
+    }
+    return 'external-api';
+  };
+
+  Map.setFilterPanelOpen = function (open) {
+    Map._filterPanelOpen = Boolean(open);
+    const panel = document.getElementById('map-sidebar');
+    const toggle = document.getElementById('map-filter-toggle');
+    if (panel) {
+      panel.hidden = !Map._filterPanelOpen;
+      panel.classList.toggle('d-none', !Map._filterPanelOpen);
+      panel.classList.toggle('d-flex', Map._filterPanelOpen);
+    }
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', Map._filterPanelOpen ? 'true' : 'false');
+      toggle.classList.toggle('active', Map._filterPanelOpen);
+    }
+  };
+
+  Map.toggleFilterPanel = function () {
+    Map.setFilterPanelOpen(!Map._filterPanelOpen);
   };
 
   Map.originMatchesFilters = function (node) {
@@ -284,6 +321,15 @@ window.Widgets.Map = window.Widgets.Map || {};
       Map.ORIGIN_LEGEND.forEach((entry) => {
         rows.push(
           Map.legendRow(
+            `<span class="legend-swatch legend-swatch-rounded" style="background-color:${entry.colour}"></span>`,
+            entry.label
+          )
+        );
+      });
+      rows.push('<div class="legend-section-label">Service status</div>');
+      Map.STATE_LEGEND.forEach((entry) => {
+        rows.push(
+          Map.legendRow(
             `<span class="legend-swatch legend-swatch-ring legend-swatch-origin-quarantine" style="--swatch-colour:${entry.colour}"></span>`,
             entry.label
           )
@@ -322,7 +368,7 @@ window.Widgets.Map = window.Widgets.Map || {};
       const fixtureCategory = isService ? Map.fixtureCategoryForService(n) : null;
       const serviceColour = isService ? Map.serviceColour(fixtureCategory) : null;
       const serviceOrigin = isService ? Map.serviceOriginFor(n) : null;
-      const isQuarantine = serviceOrigin === 'quarantine';
+      const isQuarantine = isService && String(n.service_state || '').toLowerCase() === 'quarantine';
       return {
         id: n.id,
         group: isService ? 'service' : 'nugget',
@@ -491,7 +537,7 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map.setOriginFilter = function (origin, enabled) {
-    if (origin !== 'external' && origin !== 'quarantine') return;
+    if (!Object.prototype.hasOwnProperty.call(Map._originFilters, origin)) return;
     Map._originFilters[origin] = Boolean(enabled);
     if (Map._lastGraphPayload) {
       Map.renderGraph(Map._lastGraphPayload);
@@ -558,6 +604,12 @@ window.Widgets.Map = window.Widgets.Map || {};
     el.querySelectorAll('[data-action="refresh-graph"]').forEach((btn) => {
       btn.addEventListener('click', () => Map.loadGraph());
     });
+
+    el.querySelectorAll('[data-action="toggle-filter-panel"]').forEach((btn) => {
+      btn.addEventListener('click', () => Map.toggleFilterPanel());
+    });
+
+    Map.setFilterPanelOpen(false);
 
     el.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
       btn.addEventListener('click', () => Map.setVariant(btn.dataset.variant));

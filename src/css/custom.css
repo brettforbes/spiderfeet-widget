@@ -230,14 +230,36 @@ body {
   flex-shrink: 0;
 }
 
-.map-origin-swatch-external {
+.map-origin-swatch-external-api {
   background-color: #57534e;
 }
 
-.map-origin-swatch-quarantine {
+.map-origin-swatch-cli {
+  background-color: #0d9488;
+}
+
+.map-origin-swatch-local {
+  background-color: #6366f1;
+}
+
+.map-status-swatch-quarantine {
   background-color: transparent;
   border: 2px dashed #7c3aed;
   box-sizing: border-box;
+}
+
+.map-filter-panel {
+  width: min(18rem, 90vw);
+  max-width: 18rem;
+}
+
+.map-filter-panel-scroll {
+  min-height: 0;
+}
+
+#map-layout-buttons .btn.active,
+#map-node-display-buttons .btn.active {
+  font-weight: 600;
 }
 
 .legend-swatch-origin-quarantine {
@@ -264,11 +286,6 @@ body {
   color: var(--bs-secondary-color);
   margin-top: 0.35rem;
   margin-bottom: 0.15rem;
-}
-
-#map-layout-buttons .btn.active,
-#map-node-display-buttons .btn.active {
-  font-weight: 600;
 }
 
 #tests-module-accordion .accordion-button {
