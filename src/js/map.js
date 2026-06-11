@@ -5,10 +5,28 @@ window.Widgets.Map = window.Widgets.Map || {};
   'use strict';
 
   Map.selectorPanel = '[data-widget="maps-panel"]';
-  Map.SERVICE_COLOUR = '#57534E';
+  /** Distinct from nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
+  Map.FIXTURE_POSITIVE_COLOUR = '#57534E';
+  Map.FIXTURE_NEGATIVE_COLOUR = '#991B1B';
+  Map.QUARANTINE_ORIGIN_COLOUR = '#7C3AED';
   Map.NUGGET_FALLBACK = '#3b82f6';
   Map.SERVICE_ICON = 'icon_software_used.svg';
   Map.ICON_BASE = 'icons/';
+
+  Map.FIXTURE_LEGEND = [
+    { category: 'positive', label: 'Positive fixture', colour: Map.FIXTURE_POSITIVE_COLOUR },
+    { category: 'negative', label: 'Negative fixture', colour: Map.FIXTURE_NEGATIVE_COLOUR },
+  ];
+
+  Map.ORIGIN_LEGEND = [
+    { origin: 'external-api', label: 'External API', colour: Map.FIXTURE_POSITIVE_COLOUR },
+    { origin: 'cli', label: 'CLI', colour: '#0d9488' },
+    { origin: 'local', label: 'Local', colour: '#6366f1' },
+  ];
+
+  Map.STATE_LEGEND = [
+    { state: 'quarantine', label: 'Quarantine (dashed ring)', colour: Map.QUARANTINE_ORIGIN_COLOUR },
+  ];
 
   /** Nugget type colours — @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
   Map.NUGGET_TYPE_LEGEND = [
@@ -30,6 +48,16 @@ window.Widgets.Map = window.Widgets.Map || {};
   Map._variant = 'default';
   Map._nodeDisplay = 'circles';
   Map._lastGraphPayload = null;
+  Map._graphTotals = null;
+  Map._fixtureFilters = { positive: true, negative: true };
+  Map._originFilters = { 'external-api': true, cli: true, local: true };
+  Map._serviceStateFilters = {
+    quarantine: true,
+    'passes-tests': true,
+    'needs-subscription': false,
+    error: false,
+  };
+  Map._filterPanelOpen = false;
 
   Map.iconUrl = function (filename) {
     if (!filename) return '';
@@ -43,12 +71,56 @@ window.Widgets.Map = window.Widgets.Map || {};
     if (el) el.textContent = message;
   };
 
-  Map.setInventory = function (inventory) {
+  Map.countPayloadInventory = function (payload) {
+    let serviceCount = 0;
+    let nuggetCount = 0;
+    (payload?.nodes || []).forEach((node) => {
+      if (node.kind === 'osint-service') {
+        serviceCount += 1;
+      } else {
+        nuggetCount += 1;
+      }
+    });
+    return {
+      nugget_count: nuggetCount,
+      service_count: serviceCount,
+      link_count: (payload?.links || []).length,
+    };
+  };
+
+  Map.setInventoryField = function (root, name, value) {
+    const el = root.querySelector(`[data-count="${name}"]`);
+    if (el) {
+      el.textContent = value == null ? '—' : String(value);
+    }
+  };
+
+  Map.updateInventoryDisplay = function (visible, total) {
     const root = document.getElementById('map-inventory');
-    if (!root || !inventory) return;
-    root.querySelector('[data-count="nuggets"]').textContent = inventory.nugget_count;
-    root.querySelector('[data-count="services"]').textContent = inventory.service_count;
-    root.querySelector('[data-count="links"]').textContent = inventory.link_count;
+    if (!root) return;
+    const totals = total || Map._graphTotals;
+
+    if (totals) {
+      Map.setInventoryField(root, 'nuggets-total', totals.nugget_count);
+      Map.setInventoryField(root, 'services-total', totals.service_count);
+      Map.setInventoryField(root, 'links-total', totals.link_count);
+    }
+
+    if (visible != null) {
+      Map.setInventoryField(root, 'nuggets-visible', visible.nugget_count);
+      Map.setInventoryField(root, 'services-visible', visible.service_count);
+      Map.setInventoryField(root, 'links-visible', visible.link_count);
+    }
+  };
+
+  Map.setInventory = function (inventory) {
+    if (!inventory) return;
+    Map._graphTotals = {
+      nugget_count: inventory.nugget_count,
+      service_count: inventory.service_count,
+      link_count: inventory.link_count,
+    };
+    Map.updateInventoryDisplay(null, Map._graphTotals);
   };
 
   Map.setControlsEnabled = function (enabled) {
@@ -61,6 +133,115 @@ window.Widgets.Map = window.Widgets.Map || {};
     document.querySelectorAll('#map-node-display-buttons [data-node-display]').forEach((btn) => {
       btn.disabled = !enabled;
     });
+    document.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
+      input.disabled = !enabled;
+    });
+    document.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.disabled = !enabled;
+    });
+    document.querySelectorAll('#map-service-state-filters [data-service-state-filter]').forEach((input) => {
+      input.disabled = !enabled;
+    });
+  };
+
+  Map.fixtureCategoryForService = function (node) {
+    return String(node.fixture_category || 'positive').toLowerCase() === 'negative'
+      ? 'negative'
+      : 'positive';
+  };
+
+  Map.serviceColour = function (fixtureCategory) {
+    return fixtureCategory === 'negative'
+      ? Map.FIXTURE_NEGATIVE_COLOUR
+      : Map.FIXTURE_POSITIVE_COLOUR;
+  };
+
+  Map.serviceFilterBucket = function (node) {
+    if (node.kind !== 'osint-service') return null;
+    const state = String(node.service_state || 'in-test').toLowerCase();
+    if (state === 'error') return 'error';
+    if (state === 'quarantine') return 'quarantine';
+    if (node.requires_api_key) return 'needs-subscription';
+    return 'passes-tests';
+  };
+
+  Map.serviceMatchesFilters = function (node) {
+    const bucket = Map.serviceFilterBucket(node);
+    return Boolean(bucket && Map._serviceStateFilters[bucket]);
+  };
+
+  Map.fixtureMatchesFilters = function (node) {
+    const category = Map.fixtureCategoryForService(node);
+    return Boolean(Map._fixtureFilters[category]);
+  };
+
+  Map.serviceOriginFor = function (node) {
+    const origin = String(node.service_origin || 'external-api').toLowerCase();
+    if (origin === 'external-api' || origin === 'cli' || origin === 'local') {
+      return origin;
+    }
+    if (origin === 'external' || origin === 'custom') {
+      return 'external-api';
+    }
+    if (origin === 'quarantine') {
+      return String(node.id || '').startsWith('sfp_tool_') ? 'cli' : 'local';
+    }
+    return 'external-api';
+  };
+
+  Map.setFilterPanelOpen = function (open) {
+    Map._filterPanelOpen = Boolean(open);
+    const panel = document.getElementById('map-sidebar');
+    const toggle = document.getElementById('map-filter-toggle');
+    if (panel) {
+      panel.hidden = !Map._filterPanelOpen;
+      panel.classList.toggle('d-none', !Map._filterPanelOpen);
+      panel.classList.toggle('d-flex', Map._filterPanelOpen);
+    }
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', Map._filterPanelOpen ? 'true' : 'false');
+      toggle.classList.toggle('active', Map._filterPanelOpen);
+    }
+  };
+
+  Map.toggleFilterPanel = function () {
+    Map.setFilterPanelOpen(!Map._filterPanelOpen);
+  };
+
+  Map.originMatchesFilters = function (node) {
+    return Boolean(Map._originFilters[Map.serviceOriginFor(node)]);
+  };
+
+  Map.applyGraphFilters = function (payload) {
+    const visibleServices = new Set();
+    (payload.nodes || []).forEach((node) => {
+      if (node.kind !== 'osint-service') return;
+      if (!Map.fixtureMatchesFilters(node)) return;
+      if (!Map.originMatchesFilters(node)) return;
+      if (!Map.serviceMatchesFilters(node)) return;
+      visibleServices.add(node.id);
+    });
+
+    const visibleNuggets = new Set();
+    (payload.links || []).forEach((link) => {
+      if (visibleServices.has(link.source)) {
+        visibleNuggets.add(link.target);
+      }
+    });
+
+    const filteredNodes = (payload.nodes || []).filter((node) => {
+      if (node.kind === 'osint-service') {
+        return visibleServices.has(node.id);
+      }
+      return visibleNuggets.has(node.id);
+    });
+
+    const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
+    const filteredLinks = (payload.links || []).filter(
+      (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target)
+    );
+
+    return { nodes: filteredNodes, links: filteredLinks };
   };
 
   Map.setVariantButtons = function (active) {
@@ -95,6 +276,9 @@ window.Widgets.Map = window.Widgets.Map || {};
       if (Map.isRemoteIcon(node.fav_icon)) {
         return node.fav_icon;
       }
+      if (node.fav_icon) {
+        return Map.iconUrl(String(node.fav_icon).replace(/^icons\//, ''));
+      }
       return Map.iconUrl(Map.SERVICE_ICON);
     }
     return Map.iconUrl(Map.nuggetIconFilename(node));
@@ -112,6 +296,13 @@ window.Widgets.Map = window.Widgets.Map || {};
     return `<div class="d-flex align-items-center gap-2 mb-1${extraClass ? ` ${extraClass}` : ''}">${swatchHtml}<span>${label}</span></div>`;
   };
 
+  Map.fixtureLegendSwatch = function (entry, mode) {
+    if (mode === 'icons') {
+      return `<span class="legend-swatch legend-swatch-ring" style="--swatch-colour:${entry.colour}"></span>`;
+    }
+    return `<span class="legend-swatch" style="background-color:${entry.colour}"></span>`;
+  };
+
   Map.renderLegend = function (mode) {
     const root = document.getElementById('map-legend');
     if (!root) return;
@@ -120,12 +311,31 @@ window.Widgets.Map = window.Widgets.Map || {};
       mode === 'icons' ? 'legend-swatch legend-swatch-rounded' : 'legend-swatch';
 
     const rows = [];
-    rows.push(
-      Map.legendRow(
-        `<span class="legend-swatch" style="background-color:${Map.SERVICE_COLOUR}"></span>`,
-        'OSINT service'
-      )
-    );
+    rows.push('<div class="legend-section-label">Fixture categories</div>');
+    Map.FIXTURE_LEGEND.forEach((entry) => {
+      rows.push(Map.legendRow(Map.fixtureLegendSwatch(entry, mode), entry.label));
+    });
+
+    if (mode === 'icons') {
+      rows.push('<div class="legend-section-label">Service origin</div>');
+      Map.ORIGIN_LEGEND.forEach((entry) => {
+        rows.push(
+          Map.legendRow(
+            `<span class="legend-swatch legend-swatch-rounded" style="background-color:${entry.colour}"></span>`,
+            entry.label
+          )
+        );
+      });
+      rows.push('<div class="legend-section-label">Service status</div>');
+      Map.STATE_LEGEND.forEach((entry) => {
+        rows.push(
+          Map.legendRow(
+            `<span class="legend-swatch legend-swatch-ring legend-swatch-origin-quarantine" style="--swatch-colour:${entry.colour}"></span>`,
+            entry.label
+          )
+        );
+      });
+    }
 
     rows.push('<div class="legend-section-label">Nugget types</div>');
     Map.NUGGET_TYPE_LEGEND.forEach((entry) => {
@@ -155,6 +365,10 @@ window.Widgets.Map = window.Widgets.Map || {};
     const nodes = (payload.nodes || []).map((n) => {
       const isService = n.kind === 'osint-service';
       const nuggetIcon = Map.nuggetIconFilename(n);
+      const fixtureCategory = isService ? Map.fixtureCategoryForService(n) : null;
+      const serviceColour = isService ? Map.serviceColour(fixtureCategory) : null;
+      const serviceOrigin = isService ? Map.serviceOriginFor(n) : null;
+      const isQuarantine = isService && String(n.service_state || '').toLowerCase() === 'quarantine';
       return {
         id: n.id,
         group: isService ? 'service' : 'nugget',
@@ -163,9 +377,14 @@ window.Widgets.Map = window.Widgets.Map || {};
         iconSize: isService ? 40 : 28,
         iconUrl: Map.resolveNodeIconUrl(n),
         iconFallbackUrl: isService ? Map.iconUrl(Map.SERVICE_ICON) : null,
-        colour: n.colour || (isService ? Map.SERVICE_COLOUR : Map.NUGGET_FALLBACK),
+        colour: isService ? serviceColour : n.colour || Map.NUGGET_FALLBACK,
+        fixtureColour: serviceColour,
+        originRing: isQuarantine,
+        originColour: Map.QUARANTINE_ORIGIN_COLOUR,
         meta: {
           service_state: n.service_state,
+          fixture_category: fixtureCategory,
+          service_origin: serviceOrigin,
           kind: n.kind,
           icon: isService ? n.fav_icon : nuggetIcon,
         },
@@ -206,6 +425,7 @@ window.Widgets.Map = window.Widgets.Map || {};
 
   Map.renderGraph = function (payload) {
     Map._lastGraphPayload = payload;
+    Map._graphTotals = Map.countPayloadInventory(payload);
     const generation = ++Map._renderGeneration;
 
     if (Map._graphInstance) {
@@ -213,12 +433,14 @@ window.Widgets.Map = window.Widgets.Map || {};
       Map._graphInstance = null;
     }
 
-    const { nodes, links } = Map.transformGraph(payload);
+    const filtered = Map.applyGraphFilters(payload);
+    Map.updateInventoryDisplay(Map.countPayloadInventory(filtered), Map._graphTotals);
+    const { nodes, links } = Map.transformGraph(filtered);
 
     if (!nodes.length) {
       Map.showEmpty(true);
       document.getElementById('map-node-count').textContent = '';
-      Map.setStatus('Connected — no nodes in graph export');
+      Map.setStatus('Connected — no nodes match current filters');
       return;
     }
 
@@ -306,6 +528,42 @@ window.Widgets.Map = window.Widgets.Map || {};
     }
   };
 
+  Map.setFixtureFilter = function (category, enabled) {
+    if (category !== 'positive' && category !== 'negative') return;
+    Map._fixtureFilters[category] = Boolean(enabled);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
+  Map.setOriginFilter = function (origin, enabled) {
+    if (!Object.prototype.hasOwnProperty.call(Map._originFilters, origin)) return;
+    Map._originFilters[origin] = Boolean(enabled);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
+  Map.setServiceStateFilter = function (bucket, enabled) {
+    if (!Object.prototype.hasOwnProperty.call(Map._serviceStateFilters, bucket)) return;
+    Map._serviceStateFilters[bucket] = Boolean(enabled);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
+  Map.syncFilterControls = function () {
+    document.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
+      input.checked = Boolean(Map._fixtureFilters[input.dataset.fixtureFilter]);
+    });
+    document.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.checked = Boolean(Map._originFilters[input.dataset.originFilter]);
+    });
+    document.querySelectorAll('#map-service-state-filters [data-service-state-filter]').forEach((input) => {
+      input.checked = Boolean(Map._serviceStateFilters[input.dataset.serviceStateFilter]);
+    });
+  };
+
   Map.onConnectionChange = function (connected, status) {
     const serverUp = Boolean(status?.server_reachable ?? connected);
     const dbReady = Boolean(status?.database_ready);
@@ -347,6 +605,12 @@ window.Widgets.Map = window.Widgets.Map || {};
       btn.addEventListener('click', () => Map.loadGraph());
     });
 
+    el.querySelectorAll('[data-action="toggle-filter-panel"]').forEach((btn) => {
+      btn.addEventListener('click', () => Map.toggleFilterPanel());
+    });
+
+    Map.setFilterPanelOpen(false);
+
     el.querySelectorAll('#map-layout-buttons [data-variant]').forEach((btn) => {
       btn.addEventListener('click', () => Map.setVariant(btn.dataset.variant));
     });
@@ -355,6 +619,25 @@ window.Widgets.Map = window.Widgets.Map || {};
       btn.addEventListener('click', () => Map.setNodeDisplay(btn.dataset.nodeDisplay));
     });
 
+    el.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Map.setFixtureFilter(input.dataset.fixtureFilter, input.checked);
+      });
+    });
+
+    el.querySelectorAll('#map-origin-filters [data-origin-filter]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Map.setOriginFilter(input.dataset.originFilter, input.checked);
+      });
+    });
+
+    el.querySelectorAll('#map-service-state-filters [data-service-state-filter]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Map.setServiceStateFilter(input.dataset.serviceStateFilter, input.checked);
+      });
+    });
+
+    Map.syncFilterControls();
     Map.setVariantButtons(Map._variant);
     Map.setNodeDisplayButtons(Map._nodeDisplay);
     Map.renderLegend(Map._nodeDisplay);
