@@ -11,6 +11,12 @@ $navbar-brand-font-size: 1.125rem;
 // Import Bootstrap's main SCSS file
 @import 'bootstrap/scss/bootstrap';
 
+html,
+body,
+#widget-root {
+  height: 100%;
+}
+
 body {
   overflow: hidden;
 }
@@ -25,4 +31,276 @@ body {
   height: 4rem;
   width: auto;
   max-width: 21rem;
+}
+
+.profiling-click-row {
+  cursor: pointer;
+}
+
+.profiling-click-row:hover {
+  background-color: rgba(var(--bs-primary-rgb), 0.08);
+}
+
+.profiling-scroll-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+
+// Utility: Bootstrap 5 has no min-height:0 helper, but flex children need it
+// so they can shrink below content size and let descendants fill / scroll.
+.min-h-0 {
+  min-height: 0 !important;
+}
+
+#profiling-view-detail {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.profiling-exam-tab-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+// Scrollable panes (Text, Structure doc)
+.profiling-tab-pane-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.profiling-tab-pane-scroll.active {
+  display: block;
+}
+
+// Fill panes (Structured data viewer, Graph) — fill all remaining height
+.profiling-tab-pane-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.profiling-tab-pane-fill.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.data-viewer-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+.data-viewer-iframe,
+.profiling-data-viewer-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+#profiling-view-detail.profiling-viewer-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: var(--bs-body-bg);
+  padding: 0.75rem;
+  margin: 0 !important;
+}
+
+#profiling-view-detail.profiling-viewer-fullscreen .profiling-exam-tab-content,
+#profiling-view-detail.profiling-viewer-fullscreen .data-viewer-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+#profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-command-text,
+#profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-detail-meta,
+#profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-exam-tabs,
+#profiling-view-detail.profiling-viewer-fullscreen-browser > .d-flex:first-child {
+  display: none !important;
+}
+
+#pane-profiling:has(#profiling-view-detail.profiling-viewer-fullscreen) > div > footer {
+  display: none !important;
+}
+
+.profiling-graph-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--bs-body-bg);
+}
+
+.profiling-graph-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.profiling-graph-tooltip {
+  position: absolute;
+  z-index: 20;
+  max-width: 320px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  pointer-events: none;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.profiling-graph-tooltip code,
+.profiling-graph-tooltip pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+// Structure doc tab — rendered markdown in a "print preview" page
+.profiling-markdown-doc {
+  display: block;
+  max-width: 52rem;
+  margin: 1.5rem auto;
+  padding: 2.5rem 3rem;
+  background: #ffffff;
+  color: #1f2933;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.25rem;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+[data-bs-theme='dark'] .profiling-markdown-doc {
+  background: #f6f8fa;
+  color: #1f2933;
+}
+
+.profiling-markdown-doc > :first-child {
+  margin-top: 0;
+}
+
+.profiling-markdown-doc > :last-child {
+  margin-bottom: 0;
+}
+
+.profiling-markdown-doc h1,
+.profiling-markdown-doc h2,
+.profiling-markdown-doc h3,
+.profiling-markdown-doc h4 {
+  margin-top: 1.6rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.profiling-markdown-doc h1 {
+  font-size: 1.8rem;
+  border-bottom: 1px solid #d8dee4;
+  padding-bottom: 0.3rem;
+}
+
+.profiling-markdown-doc h2 {
+  font-size: 1.4rem;
+  border-bottom: 1px solid #d8dee4;
+  padding-bottom: 0.25rem;
+}
+
+.profiling-markdown-doc h3 {
+  font-size: 1.15rem;
+}
+
+.profiling-markdown-doc h4 {
+  font-size: 1rem;
+}
+
+.profiling-markdown-doc p {
+  margin: 0 0 1rem;
+}
+
+.profiling-markdown-doc ul,
+.profiling-markdown-doc ol {
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+}
+
+.profiling-markdown-doc li {
+  margin-bottom: 0.25rem;
+}
+
+.profiling-markdown-doc blockquote {
+  margin: 0 0 1rem;
+  padding: 0.25rem 1rem;
+  color: #57606a;
+  border-left: 0.25rem solid #d0d7de;
+}
+
+.profiling-markdown-doc code {
+  background: #eff1f3;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+  color: #b00020;
+}
+
+.profiling-markdown-doc pre {
+  background: #f0f2f4;
+  border: 1px solid #d8dee4;
+  border-radius: 0.375rem;
+  padding: 0.9rem 1.1rem;
+  overflow: auto;
+  margin: 0 0 1rem;
+}
+
+.profiling-markdown-doc pre code {
+  background: transparent;
+  padding: 0;
+  color: #1f2933;
+  font-size: 0.85rem;
+}
+
+.profiling-markdown-doc table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+}
+
+.profiling-markdown-doc th,
+.profiling-markdown-doc td {
+  border: 1px solid #d0d7de;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.profiling-markdown-doc th {
+  background: #eaeef2;
+  font-weight: 600;
+}
+
+.profiling-markdown-doc hr {
+  border: 0;
+  border-top: 1px solid #d8dee4;
+  margin: 1.5rem 0;
+}
+
+.profiling-markdown-doc a {
+  color: #0969da;
+  text-decoration: none;
+}
+
+.profiling-markdown-doc a:hover {
+  text-decoration: underline;
 }
