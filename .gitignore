@@ -2,3 +2,6 @@ node_modules/
 dist/
 .hub/
 .idea/
+
+# One-off PR description drafts (use gh pr create --body-file at commit time)
+.docs/pr-body-*.md
