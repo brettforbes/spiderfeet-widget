@@ -31,6 +31,15 @@ Read **bootstrap** and **d3js** skills before editing UI.
 - **Fixture icons:** positive vs negative from API `fixture_kind` / catalogue `fixture_category`
 - Backend omits `service_state: error` modules (8 upstream-broken); do not hard-code that list in widget
 
+## CLI Profiling tab + Data Viewer embed
+
+- **Agent doc:** `.docs/data-viewer-embed.md` · **Skill:** `.cursor/skills/data-viewer-embed/SKILL.md`
+- Structured tab: `DataViewerHost.create()` + `setPayload({ content, filename })` — never raw `postMessage`
+- Fullscreen: pass `fullscreenRoot` + `structuredTabButton`; viewer `data-viewer-fullscreen-changed` → host overlay (see `.docs/data-viewer-embed.md` § Fullscreen)
+- Format: `inferFormat` → `set-mode` → delay → `set`; pass `filename` (e.g. `output_structured.xml`)
+- Theme: shell toggle → `DataViewer.syncTheme()`; iframe `id` must equal `instanceId` / `frameId`
+- One scenario = one scan command (API `/scenarios/{key}`); four artifacts: text, structured, graph JSON, markdown
+
 ## Connection gating
 
 Until TypeDB connection valid via backend API, disable/grey non-connection UI.

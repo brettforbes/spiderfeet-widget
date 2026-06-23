@@ -19,6 +19,8 @@ Or on Windows:
 
 Dev server: [http://localhost:4001](http://localhost:4001)
 
+**CLI Profiling tab** (review examination corpus): requires SpiderFeet API (`@spiderfeet/start.ps1 -Mode api`) and, for the Structured tab, the [Data Viewer](https://github.com/brettforbes/json-yaml-xml-csv-widget) embed at `http://localhost:3000/widget`.
+
 Production build:
 
 ```bash

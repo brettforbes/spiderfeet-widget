@@ -16,6 +16,12 @@ Durable project context (promoted from session/recent layers).
 - Validate product brief and replace provisional intent.
 - Enable Issues; configure branch protection; complete board setup via bootstrap `update`.
 
+## CLI Profiling + Data Viewer (2026-06)
+
+- Widget embed docs: `.docs/data-viewer-embed.md`, skill `.cursor/skills/data-viewer-embed/SKILL.md`
+- Bridge modules: `data-viewer.js`, `data-viewer-host.js`, `theme.js`; reference consumer `profiling.js`
+- Backend scenario API: `@spiderfeet/spiderfeet/api/services/cli_corpus.py`
+
 ## Norms
 
 - Governance rules: `.governance/rules/gov-*.mdc`
