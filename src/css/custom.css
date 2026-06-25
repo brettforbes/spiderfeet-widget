@@ -583,8 +583,6 @@ body {
   height: 100%;
 }
 
-#profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-command-text,
-#profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-detail-meta,
 #profiling-view-detail.profiling-viewer-fullscreen-browser #profiling-exam-tabs,
 #profiling-view-detail.profiling-viewer-fullscreen-browser > .d-flex:first-child {
   display: none !important;

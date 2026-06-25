@@ -101,7 +101,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       detailEl.classList.toggle('flex-grow-1', view === 'detail');
       detailEl.classList.toggle('min-h-0', view === 'detail');
     }
-    ['tools', 'exams', 'detail'].forEach((name) => {
+    ['tools', 'structure', 'exams', 'detail'].forEach((name) => {
       const el = document.getElementById(`profiling-view-${name}`);
       if (el) el.classList.toggle('d-none', name !== view);
     });
@@ -412,6 +412,20 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     });
   };
 
+  Profiling.renderMarkdownDoc = function (el, markdown, emptyMessage) {
+    if (!el) return;
+    const renderer = window.Widgets?.Markdown;
+    if (markdown) {
+      if (renderer) {
+        el.innerHTML = renderer.render(markdown);
+      } else {
+        el.textContent = markdown;
+      }
+      return;
+    }
+    el.innerHTML = `<p class="text-body-secondary">${emptyMessage}</p>`;
+  };
+
   Profiling.renderDetail = function (detail) {
     Profiling._detail = detail;
     Profiling._currentScenarioKey = detail.scenario_key;
@@ -428,41 +442,15 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       badge.className = `badge rounded-pill ${Profiling.reviewBadgeClass(detail.review_status)}`;
     }
 
-    const meta = document.getElementById('profiling-detail-meta');
-    if (meta) {
-      const m = detail.manifest || {};
-      const artifacts = detail.artifacts || {};
-      meta.textContent = [
-        `key: ${detail.scenario_key}`,
-        m.target ? `target: ${m.target}` : null,
-        m.runtime ? `runtime: ${m.runtime}` : null,
-        artifacts.has_text ? null : 'missing text',
-        artifacts.has_structured ? null : 'missing structured',
-        artifacts.has_graph ? null : 'missing graph',
-        artifacts.has_markdown ? null : 'missing markdown',
-      ]
-        .filter(Boolean)
-        .join(' · ');
-    }
-
-    const cmd = document.getElementById('profiling-command-text');
-    if (cmd) cmd.textContent = detail.command || '(no command capture)';
-
     const text = document.getElementById('profiling-output-text');
     if (text) text.textContent = detail.output_text || '(empty text output)';
 
     const md = document.getElementById('profiling-markdown-body');
-    if (md) {
-      const renderer = window.Widgets?.Markdown;
-      if (detail.markdown) {
-        md.innerHTML = renderer
-          ? renderer.render(detail.markdown)
-          : `<pre>${detail.markdown}</pre>`;
-      } else {
-        md.innerHTML =
-          '<p class="text-body-secondary">No nugget graph structure markdown for this scenario yet.</p>';
-      }
-    }
+    Profiling.renderMarkdownDoc(
+      md,
+      detail.graph_description_markdown || detail.markdown,
+      'No scenario graph description markdown for this scenario yet.'
+    );
 
     Profiling.pushStructuredToViewer();
     Profiling.renderProposalGraph(detail.graph_proposal);
@@ -522,13 +510,38 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     Profiling.setStatus(`${toolId}: ${scenarios.length} scenario(s).`);
   };
 
+  Profiling.openToolGraphStructure = async function (toolId) {
+    Profiling.setStatus(`Loading ${toolId} graph structure…`);
+    const doc = await Connection.fetchJson(
+      `/cli-corpus/tools/${encodeURIComponent(toolId)}/graph-structure`
+    );
+    const title = document.getElementById('profiling-structure-title');
+    if (title) title.textContent = `${toolId} — nugget graph structure`;
+    Profiling.renderMarkdownDoc(
+      document.getElementById('profiling-structure-body'),
+      doc.markdown,
+      'No tool-level nugget graph structure markdown is available.'
+    );
+    Profiling.showView('structure');
+    Profiling.setStatus(`Viewing ${toolId} graph structure.`);
+  };
+
+  Profiling.onToolStructureClick = function (event) {
+    event.stopPropagation();
+    const toolId = event.currentTarget.dataset.profilingStructure;
+    Profiling.openToolGraphStructure(toolId).catch((err) => {
+      console.error(err);
+      Profiling.setStatus(`Failed to load graph structure: ${err.message}`);
+    });
+  };
+
   Profiling.renderToolsTable = function (tools) {
     const tbody = document.getElementById('profiling-tools-tbody');
     if (!tbody) return;
 
     if (!tools.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="text-body-secondary small">No tools returned. Start SpiderFeet API with <code>.\\start.ps1 -Mode api</code> (port 8001) and ensure examination files exist under <code>.docs/docs-for-cli-tools/app_examination_docs/</code>.</td></tr>';
+        '<tr><td colspan="6" class="text-body-secondary small">No tools returned. Start SpiderFeet API with <code>.\\start.ps1 -Mode api</code> (port 8001) and ensure examination files exist under <code>.docs/docs-for-cli-tools/app_examination_docs/</code>.</td></tr>';
       return;
     }
 
@@ -544,12 +557,25 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
         <td>${row.exam_count}</td>
         <td>${row.runtime || '—'}</td>
         <td class="small text-body-secondary">${row.notes || ''}</td>
+        <td>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            data-profiling-structure="${row.id}"
+            ${row.has_graph_structure ? '' : 'disabled'}
+          >
+            Structure
+          </button>
+        </td>
       </tr>`
       )
       .join('');
 
     tbody.querySelectorAll('[data-profiling-tool]').forEach((tr) => {
       tr.addEventListener('click', () => Profiling.openTool(tr.dataset.profilingTool));
+    });
+    tbody.querySelectorAll('[data-profiling-structure]').forEach((button) => {
+      button.addEventListener('click', Profiling.onToolStructureClick);
     });
   };
 
