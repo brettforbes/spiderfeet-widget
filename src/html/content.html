@@ -728,15 +728,23 @@
                     <th scope="col">Exams</th>
                     <th scope="col">Runtime</th>
                     <th scope="col">Notes</th>
+                    <th scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="profiling-tools-tbody">
                   <tr>
-                    <td colspan="5" class="text-body-secondary small">Click Refresh corpus or switch to this tab to load.</td>
+                    <td colspan="6" class="text-body-secondary small">Click Refresh corpus or switch to this tab to load.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div id="profiling-view-structure" class="d-none">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h3 class="h6 mb-0" id="profiling-structure-title">Graph structure</h3>
+            </div>
+            <div class="border rounded p-3 profiling-markdown-doc" id="profiling-structure-body"></div>
           </div>
 
           <div id="profiling-view-exams" class="d-none">
@@ -767,8 +775,6 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="profiling-reset-review">Reset</button>
               </div>
             </div>
-            <p class="small text-body-secondary mb-2" id="profiling-detail-meta" data-viewer-chrome="graph"></p>
-            <pre class="small bg-body-tertiary border rounded p-2 mb-2" id="profiling-command-text" data-viewer-chrome="graph"></pre>
 
             <ul class="nav nav-tabs flex-shrink-0" id="profiling-exam-tabs" role="tablist" data-viewer-chrome="graph">
               <li class="nav-item" role="presentation">
@@ -781,7 +787,7 @@
                 <button class="nav-link" id="profiling-tab-graph" data-bs-toggle="tab" data-bs-target="#profiling-pane-graph" type="button" role="tab">Graph</button>
               </li>
               <li class="nav-item" role="presentation">
-                <button class="nav-link" id="profiling-tab-markdown" data-bs-toggle="tab" data-bs-target="#profiling-pane-markdown" type="button" role="tab">Structure doc</button>
+                <button class="nav-link" id="profiling-tab-markdown" data-bs-toggle="tab" data-bs-target="#profiling-pane-markdown" type="button" role="tab">Graph description</button>
               </li>
             </ul>
 
