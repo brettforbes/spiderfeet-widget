@@ -48,6 +48,12 @@ Full detail: `.governance/project/GIT_WORKFLOW.md`
 - Negative fixtures pass on `module_execution.verdict === 'clean_miss'`, not empty produced alone.
 - Tests/Subscriptions APIs exclude upstream-broken modules (`service_state: error`); trust API lists, do not duplicate the eight module IDs in widget code.
 
+## Data Viewer embed
+
+- **Read:** `.docs/data-viewer-embed.md` and skill `.cursor/skills/data-viewer-embed/SKILL.md`
+- Modules: `src/js/data-viewer.js`, `src/js/data-viewer-host.js`, `src/js/theme.js`
+- Upstream: [Embed_prompt.md](https://github.com/brettforbes/json-yaml-xml-csv-widget/blob/main/Embed_prompt.md)
+
 ## Continuity
 
 Checkpoint and promotion rules: `.governance/project/continuity/`

@@ -3,6 +3,7 @@
   data-bs-theme="light"
   id="widget-root"
   data-api-base="http://127.0.0.1:8001/api/v1"
+  data-data-viewer-url="http://localhost:3000/widget"
 >
   <header class="border-bottom bg-body-tertiary">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
@@ -76,6 +77,15 @@
               Tests
             </button>
           </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              data-shell-tab="profiling"
+            >
+              CLI Profiling
+            </button>
+          </li>
         </ul>
 
         <div
@@ -83,6 +93,15 @@
           data-widget="map-connection"
           id="map-connection"
         >
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-light"
+            data-action="toggle-theme"
+            aria-label="Switch to dark mode"
+            title="Dark mode"
+          >
+            <i class="fa-solid fa-moon" aria-hidden="true"></i>
+          </button>
           <span
             class="badge rounded-pill text-bg-secondary"
             id="connection-badge"
@@ -661,6 +680,192 @@
             <span id="subscriptions-status-text">Connect to the API to load subscriptions.</span>
           </footer>
         </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-none flex-column overflow-hidden"
+      id="pane-profiling"
+      role="tabpanel"
+      data-shell-pane="profiling"
+      data-widget="profiling-panel"
+    >
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
+        <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex flex-wrap align-items-center gap-2" data-viewer-chrome="graph">
+          <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="profiling-back-tools">
+            ← Tools
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="profiling-back-exams">
+            ← Examinations
+          </button>
+          <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">CLI App Profiling</h2>
+          <button type="button" class="btn btn-sm btn-primary" id="profiling-refresh">Refresh corpus</button>
+        </div>
+
+        <div class="flex-grow-1 overflow-hidden p-3 d-flex flex-column min-h-0" id="profiling-main-scroll">
+          <div id="profiling-view-tools">
+            <p class="small text-body-secondary">
+              Review formal CLI examination captures and nugget graph proposals. Edit artifacts in the repo;
+              use Approve/Reject to update review status files.
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle" id="profiling-tools-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Phase</th>
+                    <th scope="col">Exams</th>
+                    <th scope="col">Runtime</th>
+                    <th scope="col">Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="profiling-tools-tbody">
+                  <tr>
+                    <td colspan="5" class="text-body-secondary small">Click Refresh corpus or switch to this tab to load.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="profiling-view-exams" class="d-none">
+            <h3 class="h6 mb-2" id="profiling-exams-title">—</h3>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle">
+                <thead>
+                  <tr>
+                    <th scope="col">Scenario</th>
+                    <th scope="col">Target</th>
+                    <th scope="col">Artifacts</th>
+                    <th scope="col">Review</th>
+                    <th scope="col">Format</th>
+                  </tr>
+                </thead>
+                <tbody id="profiling-exams-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="profiling-view-detail" class="d-none d-flex flex-column flex-grow-1 min-h-0 data-viewer-fullscreen-root">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2" data-viewer-chrome="graph">
+              <h3 class="h6 mb-0" id="profiling-detail-title">Examination</h3>
+              <span class="badge rounded-pill text-bg-secondary" id="profiling-detail-review-badge">pending</span>
+              <div class="ms-auto d-flex gap-1">
+                <button type="button" class="btn btn-sm btn-success" id="profiling-approve">Approve</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="profiling-reject">Reject</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="profiling-reset-review">Reset</button>
+              </div>
+            </div>
+            <p class="small text-body-secondary mb-2" id="profiling-detail-meta" data-viewer-chrome="graph"></p>
+            <pre class="small bg-body-tertiary border rounded p-2 mb-2" id="profiling-command-text" data-viewer-chrome="graph"></pre>
+
+            <ul class="nav nav-tabs flex-shrink-0" id="profiling-exam-tabs" role="tablist" data-viewer-chrome="graph">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="profiling-tab-text" data-bs-toggle="tab" data-bs-target="#profiling-pane-text" type="button" role="tab">Text</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="profiling-tab-structured" data-bs-toggle="tab" data-bs-target="#profiling-pane-structured" type="button" role="tab">Structured</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="profiling-tab-graph" data-bs-toggle="tab" data-bs-target="#profiling-pane-graph" type="button" role="tab">Graph</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="profiling-tab-markdown" data-bs-toggle="tab" data-bs-target="#profiling-pane-markdown" type="button" role="tab">Structure doc</button>
+              </li>
+            </ul>
+
+            <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom profiling-exam-tab-content min-h-0">
+              <div class="tab-pane fade show active profiling-tab-pane-scroll" id="profiling-pane-text" role="tabpanel">
+                <pre class="profiling-scroll-pre mb-0 p-3" id="profiling-output-text"></pre>
+              </div>
+              <div class="tab-pane fade profiling-tab-pane-fill" id="profiling-pane-structured" role="tabpanel">
+                <div class="data-viewer-host" data-data-viewer-host="profiling">
+                  <iframe
+                    id="data-viewer-profiling"
+                    title="Structured data viewer"
+                    class="data-viewer-iframe"
+                    allow="fullscreen"
+                    src="http://localhost:3000/widget"
+                  ></iframe>
+                </div>
+              </div>
+              <div class="tab-pane fade profiling-tab-pane-fill position-relative" id="profiling-pane-graph" role="tabpanel">
+                <div class="d-flex flex-column flex-grow-1 min-h-0 h-100 profiling-graph-wrap" id="profiling-graph-wrap">
+                  <div class="d-flex align-items-center gap-2 px-2 py-1 border-bottom flex-shrink-0 profiling-graph-toolbar">
+                    <span class="small text-body-secondary" id="profiling-graph-stats"></span>
+                    <div class="form-check form-switch small ms-auto mb-0">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="profiling-shadow-descriptors"
+                        aria-checked="false"
+                      />
+                      <label class="form-check-label" for="profiling-shadow-descriptors">
+                        Shadow descriptors
+                      </label>
+                    </div>
+                    <div class="form-check form-switch small mb-0">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="profiling-shadow-entities"
+                        aria-checked="false"
+                      />
+                      <label class="form-check-label" for="profiling-shadow-entities">
+                        Shadow entities
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      id="profiling-legend-toggle"
+                      aria-pressed="false"
+                      title="Hide graph legend"
+                    >
+                      Hide legend
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      id="profiling-graph-fullscreen"
+                      aria-pressed="false"
+                      title="Expand graph to full screen"
+                    >
+                      Full screen
+                    </button>
+                  </div>
+                  <div id="profiling-graph-stage" class="profiling-graph-stage flex-grow-1 position-relative min-h-0">
+                    <svg
+                      id="profiling-graph-svg"
+                      class="profiling-graph-svg viz-layer"
+                      role="img"
+                      aria-label="Proposed nugget graph"
+                    ></svg>
+                    <div
+                      id="profiling-graph-tooltip"
+                      class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                      hidden
+                    ></div>
+                    <div
+                      id="profiling-graph-legend"
+                      class="position-absolute bottom-0 end-0 m-2 p-2 border rounded bg-body small shadow-sm"
+                      aria-label="Graph legend"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div class="tab-pane fade profiling-tab-pane-scroll" id="profiling-pane-markdown" role="tabpanel">
+                <div class="profiling-markdown-doc" id="profiling-markdown-body"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <footer class="border-top px-3 py-2 small text-body-secondary flex-shrink-0" aria-live="polite">
+          <span id="profiling-status-text">CLI profiling review UI.</span>
+        </footer>
       </div>
     </div>
   </div>
