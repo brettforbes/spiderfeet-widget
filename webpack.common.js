@@ -143,6 +143,7 @@ module.exports = {
                 paths.src + '/js/theme.js',
                 paths.src + '/js/viz.core.js',
                 paths.src + '/js/viz.force.js',
+                paths.src + '/js/graph-shadows.js',
                 paths.src + '/js/map.js',
                 paths.src + '/js/subscriptions.js',
                 paths.src + '/js/tests.js',

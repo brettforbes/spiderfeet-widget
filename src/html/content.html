@@ -790,8 +790,71 @@
                 </div>
               </div>
               <div class="tab-pane fade profiling-tab-pane-fill position-relative" id="profiling-pane-graph" role="tabpanel">
-                <div id="profiling-graph-stage" class="profiling-graph-stage"></div>
-                <div id="profiling-graph-tooltip" class="profiling-graph-tooltip" hidden></div>
+                <div class="d-flex flex-column flex-grow-1 min-h-0 h-100 profiling-graph-wrap" id="profiling-graph-wrap">
+                  <div class="d-flex align-items-center gap-2 px-2 py-1 border-bottom flex-shrink-0 profiling-graph-toolbar">
+                    <span class="small text-body-secondary" id="profiling-graph-stats"></span>
+                    <div class="form-check form-switch small ms-auto mb-0">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="profiling-shadow-descriptors"
+                        aria-checked="false"
+                      />
+                      <label class="form-check-label" for="profiling-shadow-descriptors">
+                        Shadow descriptors
+                      </label>
+                    </div>
+                    <div class="form-check form-switch small mb-0">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="profiling-shadow-entities"
+                        aria-checked="false"
+                      />
+                      <label class="form-check-label" for="profiling-shadow-entities">
+                        Shadow entities
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      id="profiling-legend-toggle"
+                      aria-pressed="false"
+                      title="Hide graph legend"
+                    >
+                      Hide legend
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      id="profiling-graph-fullscreen"
+                      aria-pressed="false"
+                      title="Expand graph to full screen"
+                    >
+                      Full screen
+                    </button>
+                  </div>
+                  <div id="profiling-graph-stage" class="profiling-graph-stage flex-grow-1 position-relative min-h-0">
+                    <svg
+                      id="profiling-graph-svg"
+                      class="profiling-graph-svg viz-layer"
+                      role="img"
+                      aria-label="Proposed nugget graph"
+                    ></svg>
+                    <div
+                      id="profiling-graph-tooltip"
+                      class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                      hidden
+                    ></div>
+                    <div
+                      id="profiling-graph-legend"
+                      class="position-absolute bottom-0 end-0 m-2 p-2 border rounded bg-body small shadow-sm"
+                      aria-label="Graph legend"
+                    ></div>
+                  </div>
+                </div>
               </div>
               <div class="tab-pane fade profiling-tab-pane-scroll" id="profiling-pane-markdown" role="tabpanel">
                 <div class="profiling-markdown-doc" id="profiling-markdown-body"></div>
