@@ -145,8 +145,28 @@ body {
   opacity: 0.15;
 }
 
+.node.pinned .node-circle,
+.node.pinned .node-icon-bg,
+.node.pinned .node-label-bg {
+  stroke: #f59e0b;
+  stroke-width: 2.5px;
+  stroke-dasharray: 3 2;
+}
+
 .link.dimmed {
   stroke-opacity: 0.08;
+}
+
+.link-label {
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: var(--bs-body-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.link-label.dimmed {
+  opacity: 0.12;
 }
 
 .legend-swatch {
@@ -401,6 +421,81 @@ body {
   height: 100%;
   width: 100%;
   background: var(--bs-body-bg);
+  overflow: hidden;
+}
+
+.profiling-graph-stage .profiling-graph-svg,
+.profiling-graph-stage #profiling-graph-svg {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#profiling-graph-legend {
+  z-index: 3;
+  opacity: 0.95;
+  max-width: 14rem;
+}
+
+#profiling-graph-legend.profiling-graph-legend-hidden {
+  display: none;
+}
+
+#profiling-graph-tooltip {
+  pointer-events: none;
+  z-index: 4;
+  max-width: 320px;
+}
+
+.node-shadow .node-icon-bg,
+.node-shadow .node-label-bg,
+.node-shadow .node-circle {
+  stroke: #6366f1;
+  stroke-width: 2px;
+  stroke-dasharray: 2 2;
+}
+
+.node-shadow {
+  opacity: 0.9;
+}
+
+.legend-line-had {
+  border-top-style: dashed;
+}
+
+#profiling-view-detail.profiling-graph-host-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1055;
+  background: var(--bs-body-bg);
+  padding: 0.75rem;
+  margin: 0 !important;
+}
+
+#profiling-view-detail.profiling-graph-host-fullscreen [data-viewer-chrome~='graph'] {
+  display: none !important;
+}
+
+#profiling-view-detail.profiling-graph-host-fullscreen .profiling-exam-tab-content .tab-pane {
+  display: none !important;
+}
+
+#profiling-view-detail.profiling-graph-host-fullscreen #profiling-pane-graph {
+  display: flex !important;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  opacity: 1;
+}
+
+#pane-profiling:has(#profiling-view-detail.profiling-graph-host-fullscreen) #profiling-main-scroll {
+  padding: 0 !important;
+}
+
+#pane-profiling:has(#profiling-view-detail.profiling-graph-host-fullscreen) > div > footer {
+  display: none !important;
 }
 
 .profiling-graph-svg {

@@ -11,8 +11,53 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   Profiling._graphInstance = null;
   Profiling._currentTool = null;
   Profiling._currentScenarioKey = null;
+  Profiling._graphFullscreen = false;
+  Profiling._priorExamTab = null;
+  Profiling._graphRenderGeneration = 0;
   Profiling.frameId = 'data-viewer-profiling';
   Profiling._viewer = null;
+  Profiling._shadowDescriptors = false;
+  Profiling._shadowEntities = false;
+  Profiling._legendVisible = true;
+  Profiling.ICON_BASE = 'icons/';
+
+  Profiling.META_NUGGET_IDS = new Set([
+    'SCAN_RECORD',
+    'SCAN_CLI',
+    'SCAN_VERSION',
+    'SCAN_START',
+    'SCAN_TARGET',
+    'SCAN_TOOL',
+    'SCAN_SUMMARY',
+    'SCAN_ELAPSED',
+  ]);
+
+  /** @spiderfeet/.docs/analysis/force_graph_colour_scheme.md */
+  Profiling.NUGGET_TYPE_COLOUR = {
+    ENTITY: '#3B82F6',
+    DESCRIPTOR: '#F59E0B',
+    DATA: '#14B8A6',
+    SUBENTITY: '#F97316',
+    INTERNAL: '#8B5CF6',
+    CATEGORY: '#14B8A6',
+  };
+
+  Profiling.NUGGET_TYPE_LEGEND = [
+    { type: 'ENTITY', label: 'Entity', colour: '#3B82F6' },
+    { type: 'DESCRIPTOR', label: 'Descriptor', colour: '#F59E0B' },
+    { type: 'CATEGORY', label: 'Category', colour: '#14B8A6' },
+  ];
+
+  Profiling.LINK_LEGEND = [
+    { label: 'contains', className: 'legend-line' },
+    { label: 'had (dashed)', className: 'legend-line legend-line-had' },
+    { label: 'listens-to', className: 'legend-line legend-line-produced' },
+  ];
+
+  Profiling.NODE_DISPLAY_LEGEND = [
+    { label: 'Catalogue icon', className: 'legend-swatch legend-swatch-rounded' },
+    { label: 'No icon — titled tile', className: 'legend-swatch legend-swatch-rounded' },
+  ];
 
   Profiling.reviewBadgeClass = function (status) {
     if (status === 'approved') return 'text-bg-success';
@@ -41,6 +86,9 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   };
 
   Profiling.showView = function (view) {
+    if (view !== 'detail' && Profiling._graphFullscreen) {
+      Profiling.setGraphFullscreen(false);
+    }
     const scroll = document.getElementById('profiling-main-scroll');
     if (scroll) {
       scroll.classList.toggle('overflow-auto', view !== 'detail');
@@ -68,157 +116,266 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     }
   };
 
-  Profiling.proposalToGraph = function (proposal) {
+  Profiling.iconUrlForNugget = function (nuggetId) {
+    if (!nuggetId) return '';
+    const name = `icon_${String(nuggetId).toLowerCase()}.svg`;
+    return `${Profiling.ICON_BASE}${name}`;
+  };
+
+  Profiling.colourForNode = function (node) {
+    const t = String(node.nugget_type || 'ENTITY').toUpperCase();
+    return Profiling.NUGGET_TYPE_COLOUR[t] || Profiling.NUGGET_TYPE_COLOUR.ENTITY;
+  };
+
+  Profiling.legendRow = function (swatchHtml, label, extraClass) {
+    return `<div class="d-flex align-items-center gap-2 mb-1${extraClass ? ` ${extraClass}` : ''}">${swatchHtml}<span>${label}</span></div>`;
+  };
+
+  Profiling.renderLegend = function () {
+    const root = document.getElementById('profiling-graph-legend');
+    if (!root) return;
+    root.classList.toggle('profiling-graph-legend-hidden', !Profiling._legendVisible);
+
+    const rows = [];
+    rows.push('<div class="legend-section-label">Nugget types</div>');
+    Profiling.NUGGET_TYPE_LEGEND.forEach((entry) => {
+      rows.push(
+        Profiling.legendRow(
+          `<span class="legend-swatch legend-swatch-rounded" style="background-color:${entry.colour}"></span>`,
+          entry.label
+        )
+      );
+    });
+
+    rows.push('<div class="legend-section-label mt-2">Node display</div>');
+    rows.push(
+      Profiling.legendRow(
+        `<span class="legend-swatch legend-swatch-rounded" style="background-color:#3B82F6"></span>`,
+        'Icon when catalogue SVG exists'
+      )
+    );
+    rows.push(
+      Profiling.legendRow(
+        `<span class="legend-swatch legend-swatch-rounded" style="background-color:#3B82F6;color:#fff;font-size:0.55rem;line-height:12px;text-align:center">ID</span>`,
+        'Titled tile when icon missing'
+      )
+    );
+
+    rows.push('<div class="legend-section-label mt-2">Relations</div>');
+    Profiling.LINK_LEGEND.forEach((entry, index) => {
+      rows.push(
+        Profiling.legendRow(`<span class="${entry.className}"></span>`, entry.label, index > 0 ? 'mt-1' : '')
+      );
+    });
+
+    root.innerHTML = rows.join('');
+  };
+
+  Profiling.setLegendVisible = function (visible) {
+    Profiling._legendVisible = Boolean(visible);
+    const btn = document.getElementById('profiling-legend-toggle');
+    const legend = document.getElementById('profiling-graph-legend');
+    if (btn) {
+      btn.setAttribute('aria-pressed', Profiling._legendVisible ? 'false' : 'true');
+      btn.textContent = Profiling._legendVisible ? 'Hide legend' : 'Show legend';
+      btn.title = Profiling._legendVisible ? 'Hide graph legend' : 'Show graph legend';
+    }
+    if (legend) {
+      legend.classList.toggle('profiling-graph-legend-hidden', !Profiling._legendVisible);
+    }
+  };
+
+  Profiling.toggleLegend = function () {
+    Profiling.setLegendVisible(!Profiling._legendVisible);
+  };
+
+  Profiling.setShadowToggleStates = function () {
+    const descriptors = document.getElementById('profiling-shadow-descriptors');
+    const entities = document.getElementById('profiling-shadow-entities');
+    if (descriptors) {
+      descriptors.checked = Profiling._shadowDescriptors;
+      descriptors.setAttribute('aria-checked', Profiling._shadowDescriptors ? 'true' : 'false');
+    }
+    if (entities) {
+      entities.checked = Profiling._shadowEntities;
+      entities.setAttribute('aria-checked', Profiling._shadowEntities ? 'true' : 'false');
+    }
+  };
+
+  Profiling.isMetaNugget = function (node) {
+    const nuggetId = String(node.nugget_id || node.id || '').toUpperCase();
+    const nuggetType = String(node.nugget_type || '').toUpperCase();
+    return nuggetType === 'CATEGORY' || Profiling.META_NUGGET_IDS.has(nuggetId);
+  };
+
+  Profiling.applyShadowOptions = function (proposal) {
+    let graph = proposal || { nodes: [], edges: [] };
+    const shadows = window.Widgets?.GraphShadows;
+    if (!shadows) return graph;
+
+    if (Profiling._shadowDescriptors) {
+      graph = shadows.apply(graph, {
+        mode: 'descriptors',
+        edgeRoles: ['had', 'has_this'],
+        shouldShadowTarget: (node) => String(node.nugget_type || '').toUpperCase() === 'DESCRIPTOR',
+      });
+    }
+    if (Profiling._shadowEntities) {
+      graph = shadows.apply(graph, {
+        mode: 'entities',
+        edgeRoles: ['contains', 'contains_this'],
+        shouldShadowTarget: (node) => {
+          const type = String(node.nugget_type || '').toUpperCase();
+          return (type === 'ENTITY' || type === 'SUBENTITY') && !Profiling.isMetaNugget(node);
+        },
+      });
+    }
+    return graph;
+  };
+
+  Profiling.transformProposalGraph = function (proposal) {
     if (!proposal?.nodes?.length) {
       return { nodes: [], links: [] };
     }
-    const nodes = proposal.nodes.map((n) => ({
-      id: n.id,
-      label: n.nugget_id || n.id,
-      group: (n.nugget_id || 'entity').toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-      meta: n.data || {},
-      r: n.nugget_type === 'ENTITY' ? 12 : 9,
-    }));
+
+    const nodes = proposal.nodes.map((n) => {
+      const nuggetId = n.nugget_id || n.id;
+      const colour = Profiling.colourForNode(n);
+      return {
+        id: n.id,
+        group: 'nugget',
+        label: nuggetId,
+        shortLabel: nuggetId,
+        r: 10,
+        iconSize: 28,
+        colour,
+        iconUrl: Profiling.iconUrlForNugget(nuggetId),
+        isShadow: Boolean(n.is_shadow),
+        meta: {
+          nugget_type: n.nugget_type,
+          data: n.data || n.nugget_data,
+          kind: 'nugget',
+          shadow_of: n.shadow_of || n.meta?.shadow_of,
+          shadow_mode: n.meta?.shadow_mode,
+        },
+      };
+    });
+
     const links = (proposal.edges || []).map((e, idx) => ({
       id: `edge-${idx}`,
       source: e.source,
       target: e.target,
-      relation: e.relation,
+      role: e.relation || e.name || 'contains',
     }));
+
     return { nodes, links };
   };
 
-  Profiling.renderProposalGraph = function (proposal) {
-    Profiling.destroyGraph();
-    const container = document.getElementById('profiling-graph-stage');
-    const tooltip = document.getElementById('profiling-graph-tooltip');
-    if (!container || !window.Viz?.ForceGraph) return;
+  Profiling.whenGraphStageReady = function (callback) {
+    const stage = document.getElementById('profiling-graph-stage');
+    if (!stage) {
+      callback();
+      return;
+    }
+    let attempts = 0;
+    const tryReady = () => {
+      const rect = stage.getBoundingClientRect();
+      if (rect.width > 20 && rect.height > 20) {
+        callback();
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) {
+        callback();
+        return;
+      }
+      requestAnimationFrame(tryReady);
+    };
+    tryReady();
+  };
 
-    const { nodes, links } = Profiling.proposalToGraph(proposal);
+  Profiling.setGraphFullscreen = function (on) {
+    const root = document.getElementById('profiling-view-detail');
+    const btn = document.getElementById('profiling-graph-fullscreen');
+    if (!root) return;
+
+    Profiling._graphFullscreen = Boolean(on);
+    root.classList.toggle('profiling-graph-host-fullscreen', Profiling._graphFullscreen);
+
+    if (btn) {
+      btn.setAttribute('aria-pressed', Profiling._graphFullscreen ? 'true' : 'false');
+      btn.textContent = Profiling._graphFullscreen ? 'Exit full screen' : 'Full screen';
+      btn.title = Profiling._graphFullscreen ? 'Return graph to tab' : 'Expand graph to full screen';
+    }
+
+    if (Profiling._graphFullscreen) {
+      const tabList = document.getElementById('profiling-exam-tabs');
+      const graphBtn = document.getElementById('profiling-tab-graph');
+      const active = tabList?.querySelector('.nav-link.active');
+      if (active && active !== graphBtn) {
+        Profiling._priorExamTab = active;
+      }
+      if (graphBtn && window.bootstrap?.Tab) {
+        window.bootstrap.Tab.getOrCreateInstance(graphBtn).show();
+      }
+    } else if (Profiling._priorExamTab && window.bootstrap?.Tab) {
+      window.bootstrap.Tab.getOrCreateInstance(Profiling._priorExamTab).show();
+      Profiling._priorExamTab = null;
+    }
+
+    window.setTimeout(() => {
+      if (Profiling._detail?.graph_proposal) {
+        Profiling.renderProposalGraph(Profiling._detail.graph_proposal);
+      }
+    }, 80);
+  };
+
+  Profiling.toggleGraphFullscreen = function () {
+    Profiling.setGraphFullscreen(!Profiling._graphFullscreen);
+  };
+
+  Profiling.renderProposalGraph = function (proposal) {
+    Profiling._lastGraphProposal = proposal;
+    const generation = ++Profiling._graphRenderGeneration;
+    Profiling.destroyGraph();
+
+    const stage = document.getElementById('profiling-graph-stage');
+    const stats = document.getElementById('profiling-graph-stats');
+    const svgEl = document.getElementById('profiling-graph-svg');
+    if (!stage || !svgEl || !window.Viz?.ForceGraph) return;
+
+    Profiling.setShadowToggleStates();
+    const displayProposal = Profiling.applyShadowOptions(proposal);
+    const { nodes, links } = Profiling.transformProposalGraph(displayProposal);
     if (!nodes.length) {
-      container.innerHTML =
-        '<p class="small text-body-secondary p-3 mb-0">No proposed nodes/edges JSON for this scenario yet.</p>';
+      window.Viz.Core.clear(window.Viz.Core.selectSvg(svgEl));
+      if (stats) stats.textContent = 'No proposed graph';
+      Profiling.renderLegend();
       return;
     }
 
-    container.innerHTML =
-      '<svg id="profiling-graph-svg" class="profiling-graph-svg" role="img" aria-label="Proposed nugget graph"></svg>';
-
-    const svgEl = document.getElementById('profiling-graph-svg');
-    const { width, height } = window.Viz.Core.dimensions(svgEl);
-    const svg = window.Viz.Core.selectSvg(svgEl);
-    window.Viz.Core.clear(svg);
-    svg
-      .attr('width', '100%')
-      .attr('height', '100%')
-      .attr('viewBox', `0 0 ${width} ${height}`)
-      .attr('preserveAspectRatio', 'xMidYMid meet');
-
-    const cloned = window.Viz.Core.cloneGraph({ nodes, links });
-    const colour = window.Viz.Core.colourByGroup([...new Set(cloned.nodes.map((n) => n.group))]);
-
-    const rootG = svg.append('g').attr('class', 'graph-root');
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.2, 8])
-      .on('zoom', (event) => rootG.attr('transform', event.transform));
-    svg.call(zoom);
-
-    const simulation = d3.forceSimulation(cloned.nodes);
-    simulation
-      .force('link', d3.forceLink().id((d) => d.id).distance(90).strength(0.75))
-      .force('charge', d3.forceManyBody().strength(-260))
-      .force('center', d3.forceCenter(width / 2, height / 2));
-    simulation.force('link').links(cloned.links);
-
-    const link = rootG
-      .append('g')
-      .selectAll('line')
-      .data(cloned.links)
-      .join('line')
-      .attr('stroke', '#94a3b8')
-      .attr('stroke-width', 1.5);
-
-    const pinDrag = d3
-      .drag()
-      .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      })
-      .on('drag', (event, d) => {
-        d.fx = event.x;
-        d.fy = event.y;
-      })
-      .on('end', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = event.x;
-        d.fy = event.y;
-        d.pinned = true;
-      });
-
-    const node = rootG
-      .append('g')
-      .selectAll('g')
-      .data(cloned.nodes)
-      .join('g')
-      .call(pinDrag);
-
-    node
-      .append('circle')
-      .attr('r', (d) => d.r || 10)
-      .attr('fill', (d) => colour(d.group))
-      .attr('stroke', '#1e293b')
-      .attr('stroke-width', 1.2);
-
-    node
-      .append('text')
-      .attr('dy', 4)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', 9)
-      .attr('fill', '#0f172a')
-      .attr('pointer-events', 'none')
-      .text((d) => (d.label.length > 14 ? `${d.label.slice(0, 12)}…` : d.label));
-
-    node
-      .on('mouseover', (event, d) => {
-        if (!tooltip) return;
-        tooltip.hidden = false;
-        tooltip.innerHTML = `<strong>${d.label}</strong><br/>id: ${d.id}<br/>${JSON.stringify(d.meta, null, 2)}`;
-      })
-      .on('mousemove', (event) => {
-        if (!tooltip) return;
-        const bounds = container.getBoundingClientRect();
-        tooltip.style.left = `${event.clientX - bounds.left + 12}px`;
-        tooltip.style.top = `${event.clientY - bounds.top + 12}px`;
-      })
-      .on('mouseout', () => {
-        if (tooltip) tooltip.hidden = true;
-      })
-      .on('dblclick', (event, d) => {
-        event.stopPropagation();
-        d.pinned = false;
-        d.fx = null;
-        d.fy = null;
-        simulation.alpha(0.4).restart();
-      });
-
-    simulation.on('tick', () => {
-      link
-        .attr('x1', (d) => d.source.x)
-        .attr('y1', (d) => d.source.y)
-        .attr('x2', (d) => d.target.x)
-        .attr('y2', (d) => d.target.y);
-      node.attr('transform', (d) => `translate(${d.x},${d.y})`);
+    Profiling.whenGraphStageReady(() => {
+      if (generation !== Profiling._graphRenderGeneration) return;
+      try {
+        Profiling._graphInstance = window.Viz.ForceGraph.create({
+          svg: '#profiling-graph-svg',
+          tooltip: '#profiling-graph-tooltip',
+          nodes,
+          links,
+          variant: 'default',
+          nodeDisplay: 'icons',
+          linkLabels: true,
+          linkDistance: (l) => (l.role === 'had' ? 40 : 80),
+        });
+        const shadowCount = displayProposal.shadow_meta?.shadow_count || 0;
+        const shadowText = shadowCount ? ` · ${shadowCount} shadows` : '';
+        if (stats) stats.textContent = `${nodes.length} nodes · ${links.length} links${shadowText}`;
+        Profiling.renderLegend();
+      } catch (err) {
+        console.error('Profiling.renderProposalGraph failed', err);
+        if (stats) stats.textContent = `Graph error: ${err.message}`;
+      }
     });
-
-    Profiling._graphInstance = {
-      destroy() {
-        simulation.stop();
-        svg.on('.zoom', null);
-        window.Viz.Core.clear(svg);
-      },
-    };
   };
 
   Profiling.ensureViewer = function () {
@@ -442,6 +599,9 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
 
   Profiling.onTabShown = function () {
     const active = document.querySelector('#profiling-exam-tabs .nav-link.active');
+    if (active?.id !== 'profiling-tab-graph' && Profiling._graphFullscreen) {
+      Profiling.setGraphFullscreen(false);
+    }
     if (active?.id === 'profiling-tab-graph' && Profiling._detail) {
       setTimeout(() => Profiling.renderProposalGraph(Profiling._detail.graph_proposal), 50);
     }
@@ -488,6 +648,30 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       Profiling.setReview('pending').catch((err) => Profiling.setStatus(err.message));
     });
 
+    document.getElementById('profiling-graph-fullscreen')?.addEventListener('click', () => {
+      Profiling.toggleGraphFullscreen();
+    });
+
+    document.getElementById('profiling-shadow-descriptors')?.addEventListener('change', (event) => {
+      Profiling._shadowDescriptors = event.currentTarget.checked;
+      event.currentTarget.setAttribute('aria-checked', Profiling._shadowDescriptors ? 'true' : 'false');
+      if (Profiling._detail?.graph_proposal) {
+        Profiling.renderProposalGraph(Profiling._detail.graph_proposal);
+      }
+    });
+
+    document.getElementById('profiling-shadow-entities')?.addEventListener('change', (event) => {
+      Profiling._shadowEntities = event.currentTarget.checked;
+      event.currentTarget.setAttribute('aria-checked', Profiling._shadowEntities ? 'true' : 'false');
+      if (Profiling._detail?.graph_proposal) {
+        Profiling.renderProposalGraph(Profiling._detail.graph_proposal);
+      }
+    });
+
+    document.getElementById('profiling-legend-toggle')?.addEventListener('click', () => {
+      Profiling.toggleLegend();
+    });
+
     document.querySelectorAll('#profiling-exam-tabs [data-bs-toggle="tab"]').forEach((tab) => {
       tab.addEventListener('shown.bs.tab', () => Profiling.onTabShown());
     });
@@ -503,6 +687,8 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     });
 
     Profiling.showView('tools');
+    Profiling.renderLegend();
+    Profiling.setLegendVisible(true);
     Profiling.setStatus('Open this tab to load the CLI profiling corpus (API required).');
   };
 
