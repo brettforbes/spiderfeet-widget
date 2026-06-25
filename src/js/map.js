@@ -58,6 +58,7 @@ window.Widgets.Map = window.Widgets.Map || {};
     error: false,
   };
   Map._filterPanelOpen = false;
+  Map._shadowNuggets = false;
 
   Map.iconUrl = function (filename) {
     if (!filename) return '';
@@ -132,6 +133,9 @@ window.Widgets.Map = window.Widgets.Map || {};
     });
     document.querySelectorAll('#map-node-display-buttons [data-node-display]').forEach((btn) => {
       btn.disabled = !enabled;
+    });
+    document.querySelectorAll('#map-shadow-nuggets').forEach((input) => {
+      input.disabled = !enabled;
     });
     document.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
       input.disabled = !enabled;
@@ -260,6 +264,27 @@ window.Widgets.Map = window.Widgets.Map || {};
     });
   };
 
+  Map.setShadowToggleState = function () {
+    const input = document.getElementById('map-shadow-nuggets');
+    if (!input) return;
+    input.checked = Map._shadowNuggets;
+    input.setAttribute('aria-checked', Map._shadowNuggets ? 'true' : 'false');
+  };
+
+  Map.isShadowableNugget = function (node) {
+    return node.kind !== 'osint-service' && !node.nugget_instance_id;
+  };
+
+  Map.applyShadowOptions = function (payload) {
+    const shadows = window.Widgets?.GraphShadows;
+    if (!Map._shadowNuggets || !shadows) return payload;
+    return shadows.apply(payload, {
+      mode: 'map-nuggets',
+      edgeRoles: ['consumed', 'produced'],
+      shouldShadowTarget: (node) => Map.isShadowableNugget(node),
+    });
+  };
+
   Map.isRemoteIcon = function (value) {
     return typeof value === 'string' && /^https?:\/\//i.test(value);
   };
@@ -381,12 +406,15 @@ window.Widgets.Map = window.Widgets.Map || {};
         fixtureColour: serviceColour,
         originRing: isQuarantine,
         originColour: Map.QUARANTINE_ORIGIN_COLOUR,
+        isShadow: Boolean(n.is_shadow),
         meta: {
           service_state: n.service_state,
           fixture_category: fixtureCategory,
           service_origin: serviceOrigin,
           kind: n.kind,
           icon: isService ? n.fav_icon : nuggetIcon,
+          shadow_of: n.shadow_of || n.meta?.shadow_of,
+          shadow_mode: n.meta?.shadow_mode,
         },
       };
     });
@@ -434,8 +462,9 @@ window.Widgets.Map = window.Widgets.Map || {};
     }
 
     const filtered = Map.applyGraphFilters(payload);
-    Map.updateInventoryDisplay(Map.countPayloadInventory(filtered), Map._graphTotals);
-    const { nodes, links } = Map.transformGraph(filtered);
+    const displayPayload = Map.applyShadowOptions(filtered);
+    Map.updateInventoryDisplay(Map.countPayloadInventory(displayPayload), Map._graphTotals);
+    const { nodes, links } = Map.transformGraph(displayPayload);
 
     if (!nodes.length) {
       Map.showEmpty(true);
@@ -483,7 +512,10 @@ window.Widgets.Map = window.Widgets.Map || {};
       },
     });
 
-    document.getElementById('map-node-count').textContent = `${nodes.length} nodes · ${links.length} links`;
+    const shadowCount = Map._shadowNuggets ? nodes.filter((node) => node.isShadow).length : 0;
+    const shadowText = shadowCount ? ` · ${shadowCount} shadows` : '';
+    document.getElementById('map-node-count').textContent =
+      `${nodes.length} nodes · ${links.length} links${shadowText}`;
     Map.setStatus(`Graph loaded (${nodes.length} nodes, ${links.length} links)`);
     Map.renderLegend(Map._nodeDisplay);
   };
@@ -523,6 +555,14 @@ window.Widgets.Map = window.Widgets.Map || {};
     Map._nodeDisplay = mode;
     Map.setNodeDisplayButtons(mode);
     Map.renderLegend(mode);
+    if (Map._lastGraphPayload) {
+      Map.renderGraph(Map._lastGraphPayload);
+    }
+  };
+
+  Map.setShadowNuggets = function (enabled) {
+    Map._shadowNuggets = Boolean(enabled);
+    Map.setShadowToggleState();
     if (Map._lastGraphPayload) {
       Map.renderGraph(Map._lastGraphPayload);
     }
@@ -619,6 +659,10 @@ window.Widgets.Map = window.Widgets.Map || {};
       btn.addEventListener('click', () => Map.setNodeDisplay(btn.dataset.nodeDisplay));
     });
 
+    el.querySelector('#map-shadow-nuggets')?.addEventListener('change', (event) => {
+      Map.setShadowNuggets(event.currentTarget.checked);
+    });
+
     el.querySelectorAll('#map-fixture-filters [data-fixture-filter]').forEach((input) => {
       input.addEventListener('change', () => {
         Map.setFixtureFilter(input.dataset.fixtureFilter, input.checked);
@@ -640,6 +684,7 @@ window.Widgets.Map = window.Widgets.Map || {};
     Map.syncFilterControls();
     Map.setVariantButtons(Map._variant);
     Map.setNodeDisplayButtons(Map._nodeDisplay);
+    Map.setShadowToggleState();
     Map.renderLegend(Map._nodeDisplay);
     Map.setControlsEnabled(Connection.isConnected());
     Map.showEmpty(true);
