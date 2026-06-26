@@ -723,3 +723,29 @@ body {
 .profiling-markdown-doc a:hover {
   text-decoration: underline;
 }
+
+.profiling-markdown-doc .profiling-mermaid-preview {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  overflow-x: auto;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #d8dee4;
+  border-radius: 0.25rem;
+  white-space: normal;
+  font-family: inherit;
+}
+
+.profiling-markdown-doc pre.profiling-mermaid-preview {
+  background: #ffffff;
+  border: 1px solid #d8dee4;
+}
+
+.profiling-markdown-doc .profiling-mermaid-preview svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.profiling-markdown-doc pre.mermaid-fallback {
+  margin: 1.25rem 0;
+}
