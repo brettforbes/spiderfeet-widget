@@ -17,7 +17,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   Profiling.frameId = 'data-viewer-profiling';
   Profiling._viewer = null;
   Profiling._shadowDescriptors = false;
-  Profiling._shadowEntities = false;
   Profiling._legendVisible = true;
   Profiling.ICON_BASE = 'icons/';
 
@@ -191,14 +190,9 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
 
   Profiling.setShadowToggleStates = function () {
     const descriptors = document.getElementById('profiling-shadow-descriptors');
-    const entities = document.getElementById('profiling-shadow-entities');
     if (descriptors) {
       descriptors.checked = Profiling._shadowDescriptors;
       descriptors.setAttribute('aria-checked', Profiling._shadowDescriptors ? 'true' : 'false');
-    }
-    if (entities) {
-      entities.checked = Profiling._shadowEntities;
-      entities.setAttribute('aria-checked', Profiling._shadowEntities ? 'true' : 'false');
     }
   };
 
@@ -218,16 +212,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
         mode: 'descriptors',
         edgeRoles: ['had', 'has_this'],
         shouldShadowTarget: (node) => String(node.nugget_type || '').toUpperCase() === 'DESCRIPTOR',
-      });
-    }
-    if (Profiling._shadowEntities) {
-      graph = shadows.apply(graph, {
-        mode: 'entities',
-        edgeRoles: ['contains', 'contains_this'],
-        shouldShadowTarget: (node) => {
-          const type = String(node.nugget_type || '').toUpperCase();
-          return (type === 'ENTITY' || type === 'SUBENTITY') && !Profiling.isMetaNugget(node);
-        },
       });
     }
     return graph;
@@ -412,9 +396,13 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     });
   };
 
-  Profiling.renderMarkdownDoc = function (el, markdown, emptyMessage) {
+  Profiling.renderMarkdownDoc = async function (el, markdown, emptyMessage) {
     if (!el) return;
     const renderer = window.Widgets?.Markdown;
+    if (markdown && renderer?.renderDocument) {
+      await renderer.renderDocument(el, markdown, emptyMessage);
+      return;
+    }
     if (markdown) {
       if (renderer) {
         el.innerHTML = renderer.render(markdown);
@@ -426,7 +414,45 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     el.innerHTML = `<p class="text-body-secondary">${emptyMessage}</p>`;
   };
 
-  Profiling.renderDetail = function (detail) {
+  Profiling.resetDetailChrome = function () {
+    Profiling._shadowDescriptors = false;
+    Profiling._legendVisible = true;
+    Profiling._priorExamTab = null;
+    Profiling._graphFullscreen = false;
+
+    const root = document.getElementById('profiling-view-detail');
+    if (root) {
+      root.classList.remove(
+        'profiling-graph-host-fullscreen',
+        'data-viewer-host-fullscreen',
+        'data-viewer-host-fullscreen-graph',
+        'data-viewer-host-fullscreen-browser'
+      );
+    }
+    document.getElementById('widget-root')?.classList.remove('data-viewer-host-fullscreen-browser');
+
+    const fullscreenBtn = document.getElementById('profiling-graph-fullscreen');
+    if (fullscreenBtn) {
+      fullscreenBtn.setAttribute('aria-pressed', 'false');
+      fullscreenBtn.textContent = 'Full screen';
+      fullscreenBtn.title = 'Expand graph to full screen';
+    }
+
+    Profiling.setShadowToggleStates();
+    Profiling.setLegendVisible(true);
+
+    const textTab = document.getElementById('profiling-tab-text');
+    if (textTab && window.bootstrap?.Tab) {
+      window.bootstrap.Tab.getOrCreateInstance(textTab).show();
+    }
+
+    if (window.Widgets?.DataViewer?.reset) {
+      window.Widgets.DataViewer.reset(Profiling.frameId);
+    }
+  };
+
+  Profiling.renderDetail = async function (detail) {
+    Profiling.resetDetailChrome();
     Profiling._detail = detail;
     Profiling._currentScenarioKey = detail.scenario_key;
 
@@ -446,7 +472,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     if (text) text.textContent = detail.output_text || '(empty text output)';
 
     const md = document.getElementById('profiling-markdown-body');
-    Profiling.renderMarkdownDoc(
+    await Profiling.renderMarkdownDoc(
       md,
       detail.graph_description_markdown || detail.markdown,
       'No scenario graph description markdown for this scenario yet.'
@@ -462,7 +488,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     const detail = await Connection.fetchJson(
       `/cli-corpus/tools/${encodeURIComponent(toolId)}/scenarios/${encodeURIComponent(scenarioKey)}`
     );
-    Profiling.renderDetail(detail);
+    await Profiling.renderDetail(detail);
     Profiling.setStatus(`Reviewing ${toolId} scenario ${scenarioKey}.`);
   };
 
@@ -517,7 +543,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     );
     const title = document.getElementById('profiling-structure-title');
     if (title) title.textContent = `${toolId} — nugget graph structure`;
-    Profiling.renderMarkdownDoc(
+    await Profiling.renderMarkdownDoc(
       document.getElementById('profiling-structure-body'),
       doc.markdown,
       'No tool-level nugget graph structure markdown is available.'
@@ -681,14 +707,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     document.getElementById('profiling-shadow-descriptors')?.addEventListener('change', (event) => {
       Profiling._shadowDescriptors = event.currentTarget.checked;
       event.currentTarget.setAttribute('aria-checked', Profiling._shadowDescriptors ? 'true' : 'false');
-      if (Profiling._detail?.graph_proposal) {
-        Profiling.renderProposalGraph(Profiling._detail.graph_proposal);
-      }
-    });
-
-    document.getElementById('profiling-shadow-entities')?.addEventListener('change', (event) => {
-      Profiling._shadowEntities = event.currentTarget.checked;
-      event.currentTarget.setAttribute('aria-checked', Profiling._shadowEntities ? 'true' : 'false');
       if (Profiling._detail?.graph_proposal) {
         Profiling.renderProposalGraph(Profiling._detail.graph_proposal);
       }

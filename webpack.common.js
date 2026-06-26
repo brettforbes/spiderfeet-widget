@@ -103,7 +103,11 @@ module.exports = {
           },
           noErrorOnMissing: true,
         },
-        
+        {
+          from: 'node_modules/mermaid/dist/mermaid.min.js',
+          to: paths.build + '/mermaid.min.js',
+          noErrorOnMissing: true,
+        },
       ],
     }),
 
