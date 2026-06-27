@@ -86,6 +86,18 @@
               CLI Profiling
             </button>
           </li>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link text-white-50 px-2 py-1"
+              type="button"
+              data-shell-tab="settings"
+              aria-label="Settings"
+              title="Settings — CLI paths and AI agent keys"
+            >
+              <i class="fa-solid fa-gear" aria-hidden="true"></i>
+              <span class="visually-hidden">Settings</span>
+            </button>
+          </li>
         </ul>
 
         <div
@@ -612,6 +624,21 @@
           <p class="small text-body-secondary mb-2" id="subscriptions-signup-hint">
             Open provider signups from the checklist below. Confirm each site is still free with no credit card.
           </p>
+          <h2 class="h6 text-uppercase text-body-secondary mb-2 mt-3">Service filters</h2>
+          <div class="mb-2" id="subscriptions-service-filters" role="group" aria-label="Service kind filters">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-spiderfeet" data-service-kind="spiderfeet" checked disabled />
+              <label class="form-check-label small" for="subs-filter-spiderfeet">SpiderFeet modules</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-cli" data-service-kind="cli" checked disabled />
+              <label class="form-check-label small" for="subs-filter-cli">CLI app keys</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="subs-filter-shared" data-service-kind="shared" checked disabled />
+              <label class="form-check-label small" for="subs-filter-shared">Shared (both)</label>
+            </div>
+          </div>
           <a
             class="btn btn-outline-secondary btn-sm w-100 mb-2"
             id="subscriptions-open-static-guide"
@@ -680,7 +707,7 @@
             </section>
 
             <h2 class="h6 text-uppercase text-body-secondary mb-2">Configure keys</h2>
-            <div class="accordion" id="subscriptions-module-accordion"></div>
+            <div id="subscriptions-grouped-accordions"></div>
           </div>
 
           <footer
@@ -691,6 +718,77 @@
             <span id="subscriptions-status-text">Connect to the API to load subscriptions.</span>
           </footer>
         </main>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-none flex-column overflow-hidden"
+      id="pane-settings"
+      role="tabpanel"
+      data-shell-pane="settings"
+      data-widget="settings-panel"
+    >
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
+        <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex align-items-center gap-2">
+          <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Settings</h2>
+          <button type="button" class="btn btn-sm btn-primary" id="settings-refresh">Refresh</button>
+        </div>
+        <div class="flex-grow-1 overflow-auto p-3">
+          <section class="mb-4" aria-labelledby="settings-cli-apps-heading">
+            <h3 class="h6" id="settings-cli-apps-heading">CLI App Paths</h3>
+            <p class="small text-body-secondary">
+              Register binary paths for external CLI tools. When a subscription key is saved, registered apps with
+              env files are updated automatically.
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle" id="settings-cli-apps-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Binary path</th>
+                    <th scope="col">Runtime</th>
+                    <th scope="col">Env file</th>
+                    <th scope="col">Enabled</th>
+                  </tr>
+                </thead>
+                <tbody id="settings-cli-apps-tbody">
+                  <tr><td colspan="5" class="text-body-secondary small">Connect to the API to load CLI apps.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" id="settings-cli-apps-save" disabled>Save CLI paths</button>
+          </section>
+
+          <section aria-labelledby="settings-ai-agents-heading">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h3 class="h6 mb-0" id="settings-ai-agents-heading">AI Agent Keys</h3>
+              <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="settings-ai-agent-add" disabled>Add agent</button>
+            </div>
+            <p class="small text-body-secondary">
+              Store API keys for LLM providers used by agent workflows. Keys are encrypted server-side.
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle" id="settings-ai-agents-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Label</th>
+                    <th scope="col">Provider</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Key</th>
+                    <th scope="col">Enabled</th>
+                    <th scope="col"></th>
+                  </tr>
+                </thead>
+                <tbody id="settings-ai-agents-tbody">
+                  <tr><td colspan="6" class="text-body-secondary small">Connect to the API to load agents.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+        <footer class="border-top px-3 py-2 small text-body-secondary flex-shrink-0" id="settings-status" aria-live="polite">
+          <span id="settings-status-text">Connect to the API to manage settings.</span>
+        </footer>
       </div>
     </div>
 

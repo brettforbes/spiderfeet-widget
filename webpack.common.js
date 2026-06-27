@@ -150,6 +150,7 @@ module.exports = {
                 paths.src + '/js/graph-shadows.js',
                 paths.src + '/js/map.js',
                 paths.src + '/js/subscriptions.js',
+                paths.src + '/js/settings.js',
                 paths.src + '/js/tests.js',
                 paths.src + '/js/data-viewer.js',
                 paths.src + '/js/data-viewer-host.js',
