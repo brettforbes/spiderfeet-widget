@@ -14,6 +14,17 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     manual: false,
     'paid-risk': false,
   };
+  Subscriptions._serviceKindFilters = {
+    spiderfeet: true,
+    cli: true,
+    shared: true,
+  };
+
+  Subscriptions.GROUP_LABELS = {
+    spiderfeet: 'SpiderFeet OSINT modules',
+    cli: 'CLI application keys',
+    shared: 'Shared (SpiderFeet + CLI apps)',
+  };
 
   Subscriptions.SIGNUP_BUCKET_LABELS = {
     'self-serve': 'Self-serve',
@@ -79,8 +90,37 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     return Boolean(Subscriptions._signupBucketFilters[bucket]);
   };
 
+  Subscriptions.serviceLabelsHtml = function (mod) {
+    const labels = mod.service_labels || [];
+    return labels
+      .map((label) => {
+        const isCli = label.startsWith('CLI:');
+        const cls = isCli ? 'text-bg-info' : 'text-bg-primary';
+        return `<span class="badge ${cls} me-1">${Subscriptions.escapeHtml(label)}</span>`;
+      })
+      .join('');
+  };
+
+  Subscriptions.moduleMatchesServiceFilters = function (mod) {
+    const group = mod.group || 'spiderfeet';
+    if (group === 'shared' && !Subscriptions._serviceKindFilters.shared) {
+      return false;
+    }
+    if (group === 'cli' && !Subscriptions._serviceKindFilters.cli) {
+      return false;
+    }
+    if (group === 'spiderfeet' && !Subscriptions._serviceKindFilters.spiderfeet) {
+      return false;
+    }
+    return true;
+  };
+
   Subscriptions.filteredModules = function (modules) {
-    return (modules || []).filter((mod) => Subscriptions.moduleMatchesSignupFilters(mod));
+    return (modules || []).filter(
+      (mod) =>
+        Subscriptions.moduleMatchesSignupFilters(mod) &&
+        Subscriptions.moduleMatchesServiceFilters(mod)
+    );
   };
 
   Subscriptions.renderSignupGuide = function (modules) {
@@ -144,15 +184,15 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     set('paid-tier', paid);
   };
 
-  Subscriptions.renderAccordion = function (modules) {
-    const root = document.getElementById('subscriptions-module-accordion');
+  Subscriptions.renderAccordion = function (modules, parentId) {
+    const root = document.getElementById(parentId || 'subscriptions-module-accordion');
     if (!root) return;
     root.innerHTML = '';
 
     const visible = Subscriptions.filteredModules(modules);
     if (!visible.length) {
       root.innerHTML =
-        '<p class="small text-body-secondary mb-0">No modules match the selected signup buckets.</p>';
+        '<p class="small text-body-secondary mb-0">No modules match the selected filters.</p>';
       return;
     }
 
@@ -173,10 +213,11 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
             <span class="text-body-secondary small me-2">${Subscriptions.escapeHtml(mod.name)}</span>
             ${Subscriptions.tierBadgeHtml(mod.subscription_tier, mod.has_api_key)}
             ${Subscriptions.signupBucketBadgeHtml(mod.signup_bucket)}
+            <span class="ms-2 d-inline-flex flex-wrap gap-1">${Subscriptions.serviceLabelsHtml(mod)}</span>
           </button>
         </h2>
         <div id="${itemId}-body" class="accordion-collapse collapse"
-          aria-labelledby="${itemId}-head" data-bs-parent="#subscriptions-module-accordion">
+          aria-labelledby="${itemId}-head" data-bs-parent="#${parentId || 'subscriptions-module-accordion'}">
           <div class="accordion-body" data-module-body="${mod.module_id}">
             <div class="text-body-secondary small">Expand to load subscription details…</div>
           </div>
@@ -187,6 +228,27 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
         Subscriptions.loadModuleDetail(mod.module_id);
       });
     });
+  };
+
+  Subscriptions.renderGroupedAccordions = function (modules) {
+    const host = document.getElementById('subscriptions-grouped-accordions');
+    if (!host) return;
+    host.innerHTML = '';
+    const visible = Subscriptions.filteredModules(modules);
+    const groups = ['spiderfeet', 'shared', 'cli'];
+    groups.forEach((groupKey) => {
+      const groupMods = visible.filter((mod) => (mod.group || 'spiderfeet') === groupKey);
+      if (!groupMods.length) return;
+      const section = document.createElement('section');
+      section.className = 'mb-4';
+      const accordionId = `subscriptions-accordion-${groupKey}`;
+      section.innerHTML = `<h3 class="h6 text-uppercase text-body-secondary mb-2">${Subscriptions.escapeHtml(Subscriptions.GROUP_LABELS[groupKey] || groupKey)}</h3><div class="accordion" id="${accordionId}"></div>`;
+      host.appendChild(section);
+      Subscriptions.renderAccordion(groupMods, accordionId);
+    });
+    if (!visible.length) {
+      host.innerHTML = '<p class="small text-body-secondary mb-0">No subscriptions match the selected filters.</p>';
+    }
   };
 
   Subscriptions.secretFieldsHtml = function (detail) {
@@ -236,6 +298,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
         <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
           ${signupBtn}
           ${Subscriptions.signupBucketBadgeHtml(detail.signup_bucket)}
+          ${Subscriptions.serviceLabelsHtml(detail)}
         </div>
         ${signupNote}
         <dl class="row small mb-3">
@@ -377,7 +440,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
       Subscriptions._moduleList = modules;
       Subscriptions.renderSummary(modules);
       Subscriptions.renderSignupGuide(modules);
-      Subscriptions.renderAccordion(modules);
+      Subscriptions.renderGroupedAccordions(modules);
       Subscriptions._loaded = true;
       Subscriptions.setActionButtonsEnabled(Connection.isConnected());
       const configured = modules.filter((row) => row.has_api_key).length;
@@ -396,13 +459,28 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
     document.querySelectorAll('#subscriptions-signup-filters [data-signup-bucket]').forEach((input) => {
       input.disabled = !connected;
     });
+    document.querySelectorAll('#subscriptions-service-filters [data-service-kind]').forEach((input) => {
+      input.disabled = !connected;
+    });
   };
 
   Subscriptions.setSignupBucketFilter = function (bucket, enabled) {
     if (!Object.prototype.hasOwnProperty.call(Subscriptions._signupBucketFilters, bucket)) return;
     Subscriptions._signupBucketFilters[bucket] = Boolean(enabled);
     Subscriptions.renderSignupGuide(Subscriptions._moduleList);
-    Subscriptions.renderAccordion(Subscriptions._moduleList);
+    Subscriptions.renderGroupedAccordions(Subscriptions._moduleList);
+  };
+
+  Subscriptions.setServiceKindFilter = function (kind, enabled) {
+    if (!Object.prototype.hasOwnProperty.call(Subscriptions._serviceKindFilters, kind)) return;
+    Subscriptions._serviceKindFilters[kind] = Boolean(enabled);
+    Subscriptions.renderGroupedAccordions(Subscriptions._moduleList);
+  };
+
+  Subscriptions.syncServiceFilterControls = function () {
+    document.querySelectorAll('#subscriptions-service-filters [data-service-kind]').forEach((input) => {
+      input.checked = Boolean(Subscriptions._serviceKindFilters[input.dataset.serviceKind]);
+    });
   };
 
   Subscriptions.syncSignupFilterControls = function () {
@@ -455,6 +533,12 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
       });
     });
 
+    root.querySelectorAll('#subscriptions-service-filters [data-service-kind]').forEach((input) => {
+      input.addEventListener('change', () => {
+        Subscriptions.setServiceKindFilter(input.dataset.serviceKind, input.checked);
+      });
+    });
+
     root.querySelector('#subscriptions-search')?.addEventListener('input', (event) => {
       clearTimeout(Subscriptions._searchTimer);
       const query = event.target.value.trim();
@@ -474,6 +558,7 @@ window.Widgets.Subscriptions = window.Widgets.Subscriptions || {};
 
     Subscriptions.bindFilters(el);
     Subscriptions.syncSignupFilterControls();
+    Subscriptions.syncServiceFilterControls();
     Connection.onStatusChange(Subscriptions.onConnectionChange);
     if (Connection.isConnected()) {
       Subscriptions.onConnectionChange(true);
