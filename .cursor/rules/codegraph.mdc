@@ -1,0 +1,49 @@
+---
+description: Prefer CodeGraph MCP for codebase navigation; Grep as fallback (multi-repo)
+alwaysApply: true
+---
+
+# CodeGraph — multi-repo navigation
+
+## Indexed roots
+
+| Root | Path | Role |
+|------|------|------|
+| spiderfeet-widget | `C:\projects\spiderfeet-widget` | iFrame UI (Bootstrap, D3, webpack) |
+| spiderfeet | `C:\projects\spiderfeet` | Python backend, FastAPI, modules, TypeDB map |
+
+Open both via `@spiderfeet/.seed/spiderfeet_complete.code-workspace`. Each root has its own `.codegraph/` index (local, not committed).
+
+MCP server: **`codegraph`** (stdio). Primary tool: **`codegraph_explore`**.
+
+## Prefer CodeGraph first
+
+Before Grep, SemanticSearch, or broad file reads, use **`codegraph_explore`** when the task is:
+
+- how or where a symbol, route, handler, or module works
+- callers, callees, impact, or blast radius
+- tracing a flow across files ("how does X reach Y")
+- surveying an area before editing
+
+**Multi-repo:** always pass **`projectPath`** with the absolute path of the root under investigation (table above). When work is in this repo, default to `C:\projects\spiderfeet-widget`. When the task spans the backend or API contract, query `C:\projects\spiderfeet` explicitly.
+
+Example: explore `"Tests tab route catalog and verdict UI"` with `projectPath: C:\projects\spiderfeet-widget`; explore `"FastAPI tests routes and scan_ui"` with `projectPath: C:\projects\spiderfeet`.
+
+Name a file or symbol in the query when you already know the anchor.
+
+## Fall back to Grep (or targeted Read)
+
+Use Grep / SemanticSearch / Read when CodeGraph:
+
+- returns empty, stale, or clearly wrong results
+- targets paths outside the index (`.docs/`, `dist/`, `node_modules`, generated artifacts)
+- needs a **literal** string or regex (env vars, error text, JSON keys, comments, config filenames)
+- needs exact line content after explore already identified the file
+
+**One explore attempt**, then fallback — do not retry CodeGraph in a loop.
+
+CLI equivalent when MCP is unavailable: `codegraph explore "<query>" --path <root>`.
+
+## Keep indexes fresh
+
+After large refactors: `codegraph sync <path>`. Status: `codegraph status <path>`.
