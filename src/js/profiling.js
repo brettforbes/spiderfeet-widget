@@ -1,7 +1,7 @@
 window.Widgets = window.Widgets || {};
 window.Widgets.Profiling = window.Widgets.Profiling || {};
 
-(function ($, Profiling, Widgets, Connection, DataViewerHost, document, window) {
+(function ($, Profiling, Widgets, Connection, document, window) {
   'use strict';
 
   Profiling.selectorPanel = '[data-widget="profiling-panel"]';
@@ -14,8 +14,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   Profiling._graphFullscreen = false;
   Profiling._priorExamTab = null;
   Profiling._graphRenderGeneration = 0;
-  Profiling.frameId = 'data-viewer-profiling';
-  Profiling._viewer = null;
   Profiling._shadowDescriptors = false;
   Profiling._legendVisible = true;
   Profiling.ICON_BASE = 'icons/';
@@ -362,39 +360,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     });
   };
 
-  Profiling.ensureViewer = function () {
-    if (Profiling._viewer) {
-      Profiling._viewer.ensure();
-      return Profiling._viewer;
-    }
-
-    Profiling._viewer = DataViewerHost.create({
-      instanceId: Profiling.frameId,
-      iframe: `#${Profiling.frameId}`,
-      tabButton: '#profiling-tab-structured',
-      importExportRoot: '/cli-corpus',
-      fullscreenRoot: '#profiling-view-detail',
-      structuredTabButton: '#profiling-tab-structured',
-      tabListSelector: '#profiling-exam-tabs',
-      onReady: () => Profiling.pushStructuredToViewer(),
-    });
-
-    return Profiling._viewer;
-  };
-
-  Profiling.pushStructuredToViewer = function () {
-    const viewer = Profiling.ensureViewer();
-    const structured = Profiling._detail?.structured;
-    if (!structured?.content) {
-      viewer.clear();
-      return;
-    }
-    viewer.setPayload({
-      content: structured.content,
-      filename: structured.filename,
-      format: structured.format,
-    });
-  };
+  // Structured Data Viewer lives inside CliScanApp (view mode). Legacy profiling iframe removed.
 
   Profiling.renderMarkdownDoc = async function (el, markdown, emptyMessage) {
     if (!el) return;
@@ -605,19 +571,12 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   Profiling.loadTools = async function () {
     Profiling.setStatus('Loading CLI corpus…');
     try {
-      const [config, tools] = await Promise.all([
-        Connection.fetchJson('/cli-corpus/config'),
-        Connection.fetchJson('/cli-corpus/tools'),
-      ]);
-      const viewerUrl = config.data_viewer_url || Widgets.DataViewer?.defaultSrc?.() || '';
-      Profiling.ensureViewer();
+      const tools = await Connection.fetchJson('/cli-corpus/tools');
       Profiling._tools = tools;
       Profiling.renderToolsTable(tools);
       Profiling.showView('tools');
       const examTotal = tools.reduce((sum, t) => sum + (t.exam_count || 0), 0);
-      Profiling.setStatus(
-        `Loaded ${tools.length} tool(s), ${examTotal} scenario(s). Data Viewer: ${viewerUrl}`
-      );
+      Profiling.setStatus(`Loaded ${tools.length} tool(s), ${examTotal} scenario(s).`);
     } catch (err) {
       console.error('Profiling.loadTools failed', err);
       const tbody = document.getElementById('profiling-tools-tbody');
@@ -731,7 +690,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   window.Widgets.Profiling,
   window.Widgets,
   window.Widgets.Connection,
-  window.Widgets.DataViewerHost,
   document,
   window
 );
