@@ -436,28 +436,9 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       );
     }
     document.getElementById('widget-root')?.classList.remove('data-viewer-host-fullscreen-browser');
-
-    const fullscreenBtn = document.getElementById('profiling-graph-fullscreen');
-    if (fullscreenBtn) {
-      fullscreenBtn.setAttribute('aria-pressed', 'false');
-      fullscreenBtn.textContent = 'Full screen';
-      fullscreenBtn.title = 'Expand graph to full screen';
-    }
-
-    Profiling.setShadowToggleStates();
-    Profiling.setLegendVisible(true);
-
-    const textTab = document.getElementById('profiling-tab-text');
-    if (textTab && window.bootstrap?.Tab) {
-      window.bootstrap.Tab.getOrCreateInstance(textTab).show();
-    }
-
-    if (window.Widgets?.DataViewer?.reset) {
-      window.Widgets.DataViewer.reset(Profiling.frameId);
-    }
   };
 
-    Profiling.renderDetail = async function (detail) {
+  Profiling.renderDetail = async function (detail) {
     Profiling.resetDetailChrome();
     Profiling._detail = detail;
     Profiling._currentScenarioKey = detail.scenario_key;
@@ -474,8 +455,16 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       badge.className = `badge rounded-pill ${Profiling.reviewBadgeClass(detail.review_status)}`;
     }
 
+    Profiling.showView('detail');
+
     const mount = document.getElementById('profiling-cli-scan-mount');
-    if (!mount || !window.Widgets?.CliScanApp?.create) {
+    if (!mount) {
+      Profiling.setStatus('Examination mount missing — hard-refresh the widget (Ctrl+F5).');
+      return;
+    }
+    if (!window.Widgets?.CliScanApp?.create) {
+      mount.innerHTML =
+        '<div class="alert alert-danger m-2">CliScanApp component not loaded. Rebuild/restart the widget.</div>';
       Profiling.setStatus('CliScanApp component not loaded.');
       return;
     }
@@ -489,7 +478,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       instanceId: 'profiling-cli-scan',
       dataSource: { corpusBase: '/cli-corpus', contentBase: '/content' },
     });
-    Profiling.showView('detail');
   };
 
   Profiling.loadScenario = async function (toolId, scenarioKey) {
