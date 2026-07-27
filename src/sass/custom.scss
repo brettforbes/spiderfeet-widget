@@ -330,3 +330,36 @@ body {
 .profiling-markdown-doc pre.mermaid-fallback {
   margin: 1.25rem 0;
 }
+
+.cli-scan-app {
+  min-height: 0;
+}
+
+.cli-scan-tab-content > .tab-pane.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cli-scan-form-col {
+  max-height: 100%;
+}
+
+.cli-scan-command-preview {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cli-scan-pane-scroll {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.cli-scan-pane-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}

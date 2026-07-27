@@ -414,7 +414,13 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     el.innerHTML = `<p class="text-body-secondary">${emptyMessage}</p>`;
   };
 
+  Profiling._cliScanApp = null;
+
   Profiling.resetDetailChrome = function () {
+    if (Profiling._cliScanApp) {
+      Profiling._cliScanApp.destroy();
+      Profiling._cliScanApp = null;
+    }
     Profiling._shadowDescriptors = false;
     Profiling._legendVisible = true;
     Profiling._priorExamTab = null;
@@ -468,18 +474,31 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
       badge.className = `badge rounded-pill ${Profiling.reviewBadgeClass(detail.review_status)}`;
     }
 
-    const text = document.getElementById('profiling-output-text');
-    if (text) text.textContent = detail.output_text || '(empty text output)';
+    const mount = document.getElementById('profiling-cli-scan-mount');
+    if (mount && window.Widgets?.CliScanApp?.create) {
+      mount.innerHTML = '';
+      Profiling._cliScanApp = window.Widgets.CliScanApp.create({
+        container: mount,
+        mode: 'view',
+        toolId: detail.tool_id,
+        scenarioKey: detail.scenario_key,
+        detail,
+        instanceId: 'profiling-cli-scan',
+        dataSource: { corpusBase: '/cli-corpus', contentBase: '/content' },
+      });
+    } else {
+      const text = document.getElementById('profiling-output-text');
+      if (text) text.textContent = detail.output_text || '(empty text output)';
+      const md = document.getElementById('profiling-markdown-body');
+      await Profiling.renderMarkdownDoc(
+        md,
+        detail.graph_description_markdown || detail.markdown,
+        'No scenario graph description markdown for this scenario yet.'
+      );
+      Profiling.pushStructuredToViewer();
+      Profiling.renderProposalGraph(detail.graph_proposal);
+    }
 
-    const md = document.getElementById('profiling-markdown-body');
-    await Profiling.renderMarkdownDoc(
-      md,
-      detail.graph_description_markdown || detail.markdown,
-      'No scenario graph description markdown for this scenario yet.'
-    );
-
-    Profiling.pushStructuredToViewer();
-    Profiling.renderProposalGraph(detail.graph_proposal);
     Profiling.showView('detail');
   };
 

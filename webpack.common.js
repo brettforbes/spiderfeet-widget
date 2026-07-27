@@ -155,6 +155,7 @@ module.exports = {
                 paths.src + '/js/data-viewer.js',
                 paths.src + '/js/data-viewer-host.js',
                 paths.src + '/js/markdown.js',
+                paths.src + '/js/cli-scan-app.js',
                 paths.src + '/js/profiling.js',
                 paths.src + '/js/app.js',
             ],
