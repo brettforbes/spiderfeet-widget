@@ -874,7 +874,7 @@
               </div>
             </div>
 
-            <ul class="nav nav-tabs flex-shrink-0" id="profiling-exam-tabs" role="tablist" data-viewer-chrome="graph">
+            <ul class="nav nav-tabs flex-shrink-0 d-none" id="profiling-exam-tabs" role="tablist" data-viewer-chrome="graph" aria-hidden="true">
               <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="profiling-tab-text" data-bs-toggle="tab" data-bs-target="#profiling-pane-text" type="button" role="tab">Text</button>
               </li>
@@ -889,7 +889,9 @@
               </li>
             </ul>
 
-            <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom profiling-exam-tab-content min-h-0">
+            <div id="profiling-cli-scan-mount" class="flex-grow-1 min-h-0 d-flex flex-column"></div>
+
+            <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom profiling-exam-tab-content min-h-0 d-none" aria-hidden="true">
               <div class="tab-pane fade show active profiling-tab-pane-scroll" id="profiling-pane-text" role="tabpanel">
                 <pre class="profiling-scroll-pre mb-0 p-3" id="profiling-output-text"></pre>
               </div>
