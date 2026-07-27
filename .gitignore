@@ -3,5 +3,11 @@ dist/
 .hub/
 .idea/
 
+# CodeGraph local index (per-machine) #
+.codegraph/
+
+# Cursor operator-local MCP config #
+.cursor/mcp.json
+
 # One-off PR description drafts (use gh pr create --body-file at commit time)
 .docs/pr-body-*.md

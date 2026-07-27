@@ -89,6 +89,7 @@ window.Widgets.DataViewerHost = window.Widgets.DataViewerHost || {};
       ensure: () => binding._register(),
       setPayload: (payload) => binding._setPayload(payload),
       clear: () => DataViewer.clear(instanceId),
+      reset: () => DataViewer.reset(instanceId),
       reloadWhenVisible: () => binding._reloadWhenVisible(),
     };
 

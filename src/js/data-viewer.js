@@ -486,6 +486,17 @@ window.Widgets.DataViewer = window.Widgets.DataViewer || {};
     });
   };
 
+  DataViewer.reset = function (instanceId) {
+    const state = DataViewer._instances.get(instanceId);
+    if (!state) return;
+    DataViewer._enqueue(state, () => {
+      DataViewer._post(state, {
+        type: 'data-viewer-reset',
+        frameId: instanceId,
+      });
+    });
+  };
+
   DataViewer.setTheme = function (instanceId, theme) {
     const state = DataViewer._instances.get(instanceId);
     if (!state) return;

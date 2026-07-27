@@ -8,9 +8,12 @@ const paths = require('./webpack._paths')
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
-const htmlBodyContent = fs.readFileSync(paths.src + '/html/content.html').toString();
-
 const htmlHeader = isDevelopment ? "<script src='http://localhost:35729/livereload.js'></script>" : "";
+
+function readHtmlBodyContent() {
+  // Re-read on every compile — HtmlWebpackPlugin options are otherwise frozen at process start.
+  return fs.readFileSync(paths.src + '/html/content.html', 'utf8');
+}
 
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
@@ -103,7 +106,11 @@ module.exports = {
           },
           noErrorOnMissing: true,
         },
-        
+        {
+          from: 'node_modules/mermaid/dist/mermaid.min.js',
+          to: paths.build + '/mermaid.min.js',
+          noErrorOnMissing: true,
+        },
       ],
     }),
 
@@ -114,9 +121,19 @@ module.exports = {
       description: config.description,
       template: paths.src + '/html/_index.html', // template file
       filename: 'index.html', // output file
-      body: htmlBodyContent,
       header: htmlHeader,
       inject: false, //dont inject anything
+      templateParameters: (_compilation, _assets, _assetTags, options) => ({
+        htmlWebpackPlugin: {
+          options: {
+            ...options,
+            title: config.title,
+            description: config.description,
+            header: htmlHeader,
+            body: readHtmlBodyContent(),
+          },
+        },
+      }),
     }),
 
     //TODO: update this to include only the vendor files that are needed for the widget
@@ -146,10 +163,12 @@ module.exports = {
                 paths.src + '/js/graph-shadows.js',
                 paths.src + '/js/map.js',
                 paths.src + '/js/subscriptions.js',
+                paths.src + '/js/settings.js',
                 paths.src + '/js/tests.js',
                 paths.src + '/js/data-viewer.js',
                 paths.src + '/js/data-viewer-host.js',
                 paths.src + '/js/markdown.js',
+                paths.src + '/js/cli-scan-app.js',
                 paths.src + '/js/profiling.js',
                 paths.src + '/js/app.js',
             ],

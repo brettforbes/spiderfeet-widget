@@ -304,3 +304,62 @@ body {
 .profiling-markdown-doc a:hover {
   text-decoration: underline;
 }
+
+.profiling-markdown-doc .profiling-mermaid-preview {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  overflow-x: auto;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #d8dee4;
+  border-radius: 0.25rem;
+  white-space: normal;
+  font-family: inherit;
+}
+
+.profiling-markdown-doc pre.profiling-mermaid-preview {
+  background: #ffffff;
+  border: 1px solid #d8dee4;
+}
+
+.profiling-markdown-doc .profiling-mermaid-preview svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.profiling-markdown-doc pre.mermaid-fallback {
+  margin: 1.25rem 0;
+}
+
+.cli-scan-app {
+  min-height: 0;
+}
+
+.cli-scan-tab-content > .tab-pane.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cli-scan-form-col {
+  max-height: 100%;
+}
+
+.cli-scan-command-preview {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cli-scan-pane-scroll {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.cli-scan-pane-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}

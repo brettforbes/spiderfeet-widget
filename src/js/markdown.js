@@ -6,13 +6,18 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
  *
  * Scope is intentionally small: it covers the constructs used by the CLI
  * profiling "Structure doc" artifacts (nugget_graph_structure.md): headings,
- * paragraphs, fenced code blocks, inline code, bold/italic, links, blockquotes,
- * ordered/unordered lists, GitHub-style tables, and horizontal rules.
+ * paragraphs, fenced code blocks, Mermaid flowcharts, inline code, bold/italic,
+ * links, blockquotes, ordered/unordered lists, GitHub-style tables, and
+ * horizontal rules.
  *
  * Output is escaped before formatting so raw markdown can never inject markup.
+ * Mermaid blocks are extracted before HTML conversion so arrow tokens like
+ * `-->` never pass through innerHTML.
  */
 (function (Markdown) {
   'use strict';
+
+  const MERMAID_FENCE_RE = /```mermaid\r?\n([\s\S]*?)```/g;
 
   function escapeHtml(text) {
     return String(text)
@@ -26,23 +31,19 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
   // Inline formatting on already-escaped text.
   function inline(text) {
     let out = text;
-    // inline code first so its contents are not further formatted
     const codeStore = [];
     out = out.replace(/`([^`]+)`/g, (_m, code) => {
       codeStore.push(code);
       return `\u0000CODE${codeStore.length - 1}\u0000`;
     });
-    // links [text](url)
     out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label, url) => {
       const safe = /^(https?:|mailto:|#|\/)/i.test(url) ? url : '#';
       return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     });
-    // bold then italic
     out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     out = out.replace(/__([^_]+)__/g, '<strong>$1</strong>');
     out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     out = out.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
-    // restore inline code
     out = out.replace(/\u0000CODE(\d+)\u0000/g, (_m, i) => `<code>${codeStore[Number(i)]}</code>`);
     return out;
   }
@@ -78,9 +79,154 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
     return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
   }
 
+  let mermaidInitialized = false;
+  let mermaidRenderCounter = 0;
+  let mermaidLoadPromise = null;
+
+  const MERMAID_SLOT_LINE_RE = /^@@MERMAID-DIAGRAM-(\d+)@@$/;
+
+  function mermaidSlotToken(index) {
+    return `@@MERMAID-DIAGRAM-${index}@@`;
+  }
+
+  function mermaidSlotMarkup(index) {
+    return `<div class="profiling-mermaid-slot" data-mermaid-index="${index}"></div>`;
+  }
+
+  function isMermaidSlotLine(line) {
+    return MERMAID_SLOT_LINE_RE.test(String(line).trim());
+  }
+
+  Markdown.prepare = function (markdown) {
+    const blocks = [];
+    const stripped = String(markdown || '').replace(MERMAID_FENCE_RE, (_match, source) => {
+      const index = blocks.length;
+      blocks.push(String(source).trim());
+      return `\n\n${mermaidSlotToken(index)}\n\n`;
+    });
+    return { stripped, blocks };
+  };
+
+  Markdown.hydrateMermaidSlots = function (container) {
+    if (!container) return;
+    container.querySelectorAll('.profiling-mermaid-slot').forEach((slot) => {
+      const host = document.createElement('div');
+      host.className = 'profiling-mermaid-preview';
+      host.dataset.mermaidIndex = slot.dataset.mermaidIndex || '';
+      slot.replaceWith(host);
+    });
+  };
+
+  Markdown.ensureMermaid = function () {
+    if (globalThis.mermaid?.render) {
+      return Promise.resolve(globalThis.mermaid);
+    }
+    if (mermaidLoadPromise) {
+      return mermaidLoadPromise;
+    }
+
+    mermaidLoadPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-mermaid-loader]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(globalThis.mermaid), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Failed to load Mermaid')), {
+          once: true,
+        });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = './mermaid.min.js';
+      script.dataset.mermaidLoader = 'true';
+      script.addEventListener(
+        'load',
+        () => {
+          if (globalThis.mermaid?.render) {
+            resolve(globalThis.mermaid);
+            return;
+          }
+          reject(new Error('Mermaid loaded but globalThis.mermaid.render is unavailable'));
+        },
+        { once: true }
+      );
+      script.addEventListener('error', () => reject(new Error('Failed to load mermaid.min.js')), {
+        once: true,
+      });
+      document.head.appendChild(script);
+    });
+
+    return mermaidLoadPromise;
+  };
+
+  Markdown.renderMermaid = async function (container, blocks) {
+    if (!container || !blocks?.length) return;
+
+    const hosts = container.querySelectorAll(
+      '.profiling-mermaid-preview:not([data-mermaid-rendered])'
+    );
+    if (!hosts.length) return;
+
+    let mermaid;
+    try {
+      mermaid = await Markdown.ensureMermaid();
+    } catch (err) {
+      console.error('Mermaid unavailable', err);
+      hosts.forEach((host) => {
+        const source = blocks[Number(host.dataset.mermaidIndex)] || '';
+        host.innerHTML = `<pre class="mermaid-fallback"><code class="language-mermaid">${escapeHtml(source)}</code></pre>`;
+      });
+      return;
+    }
+
+    const theme =
+      document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'dark' : 'default';
+
+    if (!mermaidInitialized) {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme,
+        securityLevel: 'loose',
+        flowchart: { useMaxWidth: true, htmlLabels: false },
+      });
+      mermaidInitialized = true;
+    }
+
+    for (const host of hosts) {
+      const source = blocks[Number(host.dataset.mermaidIndex)];
+      if (!source) continue;
+
+      const renderId = `profiling-mermaid-${Date.now()}-${mermaidRenderCounter++}`;
+      try {
+        const result = await mermaid.render(renderId, source);
+        host.innerHTML = result.svg;
+        result.bindFunctions?.(host);
+        host.setAttribute('data-mermaid-rendered', 'true');
+      } catch (err) {
+        console.error('Mermaid render failed', err);
+        host.innerHTML = `<pre class="mermaid-fallback"><code class="language-mermaid">${escapeHtml(source)}</code></pre>`;
+        host.setAttribute('data-mermaid-rendered', 'error');
+      }
+    }
+  };
+
+  Markdown.renderDocument = async function (container, markdown, emptyMessage) {
+    if (!container) return;
+    if (!markdown) {
+      container.innerHTML = `<p class="text-body-secondary">${emptyMessage}</p>`;
+      return;
+    }
+
+    const { stripped, blocks } = Markdown.prepare(markdown);
+    container.innerHTML = Markdown.render(stripped);
+    Markdown.hydrateMermaidSlots(container);
+    await Markdown.renderMermaid(container, blocks);
+  };
+
   Markdown.render = function (markdown) {
     if (!markdown) return '';
-    const escaped = escapeHtml(markdown.replace(/\r\n/g, '\n'));
+    const normalized = markdown.replace(/\r\n/g, '\n');
+    const originalLines = normalized.split('\n');
+    const escaped = escapeHtml(normalized);
     const lines = escaped.split('\n');
     const html = [];
     let i = 0;
@@ -96,24 +242,22 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
     while (i < lines.length) {
       const line = lines[i];
 
-      // fenced code block
       const fence = line.match(/^\s*```(.*)$/);
       if (fence) {
         closeList();
         const lang = fence[1].trim();
-        const buf = [];
+        const rawBuf = [];
         i += 1;
         while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
-          buf.push(lines[i]);
+          rawBuf.push(originalLines[i] || '');
           i += 1;
         }
-        i += 1; // skip closing fence
+        i += 1;
         const cls = lang ? ` class="language-${lang}"` : '';
-        html.push(`<pre><code${cls}>${buf.join('\n')}</code></pre>`);
+        html.push(`<pre><code${cls}>${escapeHtml(rawBuf.join('\n'))}</code></pre>`);
         continue;
       }
 
-      // table
       if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
         closeList();
         const rows = [line, lines[i + 1]];
@@ -126,7 +270,6 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // headings
       const heading = line.match(/^(#{1,6})\s+(.*)$/);
       if (heading) {
         closeList();
@@ -136,7 +279,6 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // horizontal rule
       if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
         closeList();
         html.push('<hr />');
@@ -144,7 +286,6 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // blockquote
       if (/^\s*>\s?/.test(line)) {
         closeList();
         const buf = [];
@@ -156,7 +297,6 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // unordered list
       const ul = line.match(/^\s*[-*+]\s+(.*)$/);
       if (ul) {
         if (listType !== 'ul') {
@@ -169,7 +309,6 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // ordered list
       const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
       if (ol) {
         if (listType !== 'ol') {
@@ -182,14 +321,20 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         continue;
       }
 
-      // blank line
       if (line.trim() === '') {
         closeList();
         i += 1;
         continue;
       }
 
-      // paragraph (gather consecutive non-empty, non-special lines)
+      const mermaidSlot = line.trim().match(MERMAID_SLOT_LINE_RE);
+      if (mermaidSlot) {
+        closeList();
+        html.push(mermaidSlotMarkup(Number(mermaidSlot[1])));
+        i += 1;
+        continue;
+      }
+
       closeList();
       const buf = [line];
       i += 1;
@@ -200,7 +345,8 @@ window.Widgets.Markdown = window.Widgets.Markdown || {};
         !/^(#{1,6})\s+/.test(lines[i]) &&
         !/^\s*[-*+]\s+/.test(lines[i]) &&
         !/^\s*\d+[.)]\s+/.test(lines[i]) &&
-        !/^\s*>\s?/.test(lines[i])
+        !/^\s*>\s?/.test(lines[i]) &&
+        !isMermaidSlotLine(lines[i])
       ) {
         buf.push(lines[i]);
         i += 1;
