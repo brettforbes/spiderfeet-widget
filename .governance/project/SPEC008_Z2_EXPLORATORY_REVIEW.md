@@ -20,8 +20,11 @@
 
 ## Follow-ups
 
-- Operator visual smoke across remaining 5 tools/scenarios in running widget + API (`./start.ps1 -Mode api`, widget `npm start`).
-- Epic X / AA (live execute) intentionally not in Phase 1 scope — Execute button hidden in view mode.
+- Operator visual smoke across remaining tools/scenarios in running widget + API.
+
+## Out of scope (operator directive)
+
+- Composer page, live execute API, and edit-run mode are explicitly out of scope for this delivery.
 
 ## Evidence
 
