@@ -457,7 +457,7 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     }
   };
 
-  Profiling.renderDetail = async function (detail) {
+    Profiling.renderDetail = async function (detail) {
     Profiling.resetDetailChrome();
     Profiling._detail = detail;
     Profiling._currentScenarioKey = detail.scenario_key;
@@ -475,30 +475,20 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     }
 
     const mount = document.getElementById('profiling-cli-scan-mount');
-    if (mount && window.Widgets?.CliScanApp?.create) {
-      mount.innerHTML = '';
-      Profiling._cliScanApp = window.Widgets.CliScanApp.create({
-        container: mount,
-        mode: 'view',
-        toolId: detail.tool_id,
-        scenarioKey: detail.scenario_key,
-        detail,
-        instanceId: 'profiling-cli-scan',
-        dataSource: { corpusBase: '/cli-corpus', contentBase: '/content' },
-      });
-    } else {
-      const text = document.getElementById('profiling-output-text');
-      if (text) text.textContent = detail.output_text || '(empty text output)';
-      const md = document.getElementById('profiling-markdown-body');
-      await Profiling.renderMarkdownDoc(
-        md,
-        detail.graph_description_markdown || detail.markdown,
-        'No scenario graph description markdown for this scenario yet.'
-      );
-      Profiling.pushStructuredToViewer();
-      Profiling.renderProposalGraph(detail.graph_proposal);
+    if (!mount || !window.Widgets?.CliScanApp?.create) {
+      Profiling.setStatus('CliScanApp component not loaded.');
+      return;
     }
-
+    mount.innerHTML = '';
+    Profiling._cliScanApp = window.Widgets.CliScanApp.create({
+      container: mount,
+      mode: 'view',
+      toolId: detail.tool_id,
+      scenarioKey: detail.scenario_key,
+      detail,
+      instanceId: 'profiling-cli-scan',
+      dataSource: { corpusBase: '/cli-corpus', contentBase: '/content' },
+    });
     Profiling.showView('detail');
   };
 
@@ -682,14 +672,6 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
     const el = $root[0];
     if (el.dataset.profilingInitialized === 'true') return;
     el.dataset.profilingInitialized = 'true';
-
-    Profiling.ensureViewer();
-
-    window.addEventListener('shell:theme-changed', () => {
-      if (Profiling._detail?.structured?.content) {
-        Profiling.pushStructuredToViewer();
-      }
-    });
 
     document.getElementById('profiling-back-tools')?.addEventListener('click', () => {
       Profiling.showView('tools');

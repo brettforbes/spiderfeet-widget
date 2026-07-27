@@ -109,17 +109,22 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
 
     CliScanApp._setStatus(container, state, `Loading ${state.toolId}…`);
 
-    const [schema, manifest] = await Promise.all([
-      Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}/options-schema`),
-      Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}`),
-    ]);
-    state.schema = schema;
-    state.manifest = manifest;
-    state.values = CliScanApp._initialValues(schema, state.detail);
+    try {
+      const [schema, manifest] = await Promise.all([
+        Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}/options-schema`),
+        Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}`),
+      ]);
+      state.schema = schema;
+      state.manifest = manifest;
+    } catch (err) {
+      console.warn('CliScanApp: content API unavailable, Scan tab limited', err);
+      state.schema = { tool_id: state.toolId, groups: ['General'], flags: [] };
+      state.manifest = { tool_id: state.toolId, executable: state.toolId };
+    }
+    state.values = CliScanApp._initialValues(state.schema, state.detail);
 
     CliScanApp._renderScanForm(container, state);
     CliScanApp._updateCommandPreview(container, state);
-    CliScanApp._toggleExecuteVisibility(container, state);
 
     if (state.detail) {
       CliScanApp._renderOutputs(container, state);
@@ -145,8 +150,6 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         <div class="col-12 col-lg-9 border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-form></div>
         <div class="col-12 col-lg-3 cli-scan-rail p-3 d-flex flex-column gap-2">
           <div class="d-grid gap-2" data-cli-scan-rail-actions></div>
-          <div class="small text-body-secondary" data-cli-scan-run-meta></div>
-          <div class="progress d-none" style="height:6px" data-cli-scan-progress-wrap><div class="progress-bar" data-cli-scan-progress style="width:0%"></div></div>
           <label class="small fw-semibold mt-2">Command preview</label>
           <pre class="cli-scan-command-preview small bg-body-secondary bg-opacity-25 border rounded p-2 mb-0" data-cli-scan-command></pre>
         </div>
@@ -170,8 +173,8 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           <button type="button" class="btn btn-sm btn-outline-secondary" data-cli-scan-graph-fullscreen>Full screen</button>
         </div>
         <div class="profiling-graph-stage flex-grow-1 position-relative min-h-0" data-cli-scan-graph-stage>
-          <svg class="profiling-graph-svg viz-layer" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></svg>
-          <div class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm" hidden data-cli-scan-graph-tooltip></div>
+          <svg id="${id}-graph-svg" class="profiling-graph-svg viz-layer" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></svg>
+          <div id="${id}-graph-tooltip" class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm" hidden data-cli-scan-graph-tooltip></div>
           <div class="position-absolute bottom-0 end-0 m-2 p-2 border rounded bg-body small shadow-sm" data-cli-scan-graph-legend aria-label="Graph legend"></div>
         </div>
       </div>
@@ -216,30 +219,13 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const actions = container.querySelector('[data-cli-scan-rail-actions]');
     if (!actions) return;
     actions.innerHTML = `
-      <button type="button" class="btn btn-primary d-none" data-cli-scan-execute>Execute</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="options">Options</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="graph-structure">Graph Structure</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="zero-to-hero">User Guide</button>`;
 
-    actions.querySelector('[data-cli-scan-execute]')?.addEventListener('click', () => {
-      CliScanApp._setStatus(container, state, 'Execute API not wired yet (AA2 gate). Command preview updated.');
-    });
-
     actions.querySelectorAll('[data-cli-scan-modal-btn]').forEach((btn) => {
       btn.addEventListener('click', () => CliScanApp._openModal(container, state, btn.dataset.cliScanModalBtn));
     });
-  };
-
-  CliScanApp._toggleExecuteVisibility = function (container, state) {
-    const btn = container.querySelector('[data-cli-scan-execute]');
-    if (!btn) return;
-    if (state.mode === 'view') {
-      btn.classList.add('d-none');
-      btn.disabled = true;
-    } else {
-      btn.classList.remove('d-none');
-      btn.disabled = false;
-    }
   };
 
   CliScanApp._initialValues = function (schema, detail) {
@@ -492,6 +478,8 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
 
     const stage = container.querySelector('[data-cli-scan-graph-stage]');
+    const svgSelector = `#${state.instanceId}-graph-svg`;
+    const tooltipSelector = `#${state.instanceId}-graph-tooltip`;
     const tryRender = (attempts) => {
       const rect = stage?.getBoundingClientRect() || { width: 0, height: 0 };
       if ((rect.width <= 20 || rect.height <= 20) && attempts < 60) {
@@ -501,8 +489,8 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       if (generation !== state.graphRenderGeneration) return;
       try {
         state.graphInstance = window.Viz.ForceGraph.create({
-          svg: svgEl,
-          tooltip: container.querySelector('[data-cli-scan-graph-tooltip]'),
+          svg: svgSelector,
+          tooltip: tooltipSelector,
           nodes,
           links,
           variant: 'default',
