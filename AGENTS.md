@@ -16,6 +16,7 @@ This repository uses **VibeGov** governance. Read this file first, then follow l
 | Stage plan | `@spiderfeet/.seed/02_stage_by_stage_reengineer.md` |
 | Bootstrap status | `.governance/project/bootstrap/STATUS.md` |
 | Setup blockers | `INIT-TODO.md` |
+| **SPEC-008 CLI/API Scan UI — CliScanApp component + Composer (active):** | backend spec `@spiderfeet/.governance/specs/SPEC-008-cli-app-scan-ui-content-platform.md` · this repo's plan `.governance/project/SPEC008_AGENT_PLAN.md` (autonomous execute→PR→merge loop; gate on AA2) · issue index `.governance/project/SPEC008_WIDGET_ISSUE_INDEX.md` · backend issue index `@spiderfeet/.governance/project/SPEC008_ISSUE_INDEX.md` |
 
 ## Delivery loop
 
