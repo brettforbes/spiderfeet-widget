@@ -2,7 +2,9 @@
  * Viz.CanvasGraph — canvas-rendered force graph (SPEC-009).
  * AB1: scaffold + zoom/resize + rAF draw loop.
  * AB2: node/link drawing parity with Viz.ForceGraph.
- * Physics offload = Epic AC; hit-testing = AB3.
+ * AB3: quadtree hit-testing / hover / drag / tooltip.
+ * AB4: destroy() tears down rAF, zoom/drag, Image cache, worker; HTML legends stay in consumers.
+ * Physics offload = Epic AC.
  */
 (function (global) {
   'use strict';
