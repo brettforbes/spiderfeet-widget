@@ -52,9 +52,18 @@ globalThis.Widgets.GraphShadows = globalThis.Widgets.GraphShadows || {};
       return { ...edge, target: shadowId, shadow_of: edge.target };
     });
 
+    // Index edges by source once (O(edges)), then look up per shadow pair (O(1) + matching).
+    // Replaces the prior O(shadowPairs × edges) nested scan with identical output semantics.
+    const edgesBySource = new Map();
+    edges.forEach((edge) => {
+      const list = edgesBySource.get(edge.source);
+      if (list) list.push(edge);
+      else edgesBySource.set(edge.source, [edge]);
+    });
     shadowPairs.forEach(({ originalId, shadowId }) => {
-      edges.forEach((edge) => {
-        if (edge.source !== originalId) return;
+      const outgoing = edgesBySource.get(originalId);
+      if (!outgoing) return;
+      outgoing.forEach((edge) => {
         nextEdges.push({
           ...edge,
           id: `${edge.id}::shadow-source::${shadowId}`,
