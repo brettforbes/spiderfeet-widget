@@ -173,7 +173,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           <button type="button" class="btn btn-sm btn-outline-secondary" data-cli-scan-graph-fullscreen>Full screen</button>
         </div>
         <div class="profiling-graph-stage flex-grow-1 position-relative min-h-0" data-cli-scan-graph-stage>
-          <svg id="${id}-graph-svg" class="profiling-graph-svg viz-layer" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></svg>
+          <canvas id="${id}-graph-svg" class="profiling-graph-svg viz-layer w-100 h-100" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></canvas>
           <div id="${id}-graph-tooltip" class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm" hidden data-cli-scan-graph-tooltip></div>
           <div class="position-absolute bottom-0 end-0 m-2 p-2 border rounded bg-body small shadow-sm" data-cli-scan-graph-legend aria-label="Graph legend"></div>
         </div>
@@ -466,12 +466,16 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     const svgEl = container.querySelector('[data-cli-scan-graph-svg]');
     const stats = container.querySelector('[data-cli-scan-graph-stats]');
-    if (!svgEl || !window.Viz?.ForceGraph) return;
+    if (!svgEl || !window.Viz?.CanvasGraph) return;
 
     const displayProposal = CliScanApp.applyShadowOptions(proposal, state.shadowDescriptors);
     const { nodes, links } = CliScanApp.transformProposalGraph(displayProposal);
     if (!nodes.length) {
-      window.Viz.Core?.clear(window.Viz.Core.selectSvg(svgEl));
+      const ctx = svgEl.getContext?.('2d');
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, svgEl.width || 0, svgEl.height || 0);
+      }
       if (stats) stats.textContent = 'No proposed graph';
       CliScanApp.renderLegend(container, state);
       return;
@@ -488,15 +492,15 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       }
       if (generation !== state.graphRenderGeneration) return;
       try {
-        state.graphInstance = window.Viz.ForceGraph.create({
-          svg: svgSelector,
+        state.graphInstance = window.Viz.CanvasGraph.create({
+          canvas: svgSelector,
           tooltip: tooltipSelector,
           nodes,
           links,
           variant: 'default',
           nodeDisplay: 'icons',
           linkLabels: true,
-          linkDistance: (l) => (l.role === 'had' ? 40 : 80),
+          linkDistance: 80,
         });
         if (stats) stats.textContent = `${nodes.length} nodes · ${links.length} links`;
         CliScanApp.renderLegend(container, state);
