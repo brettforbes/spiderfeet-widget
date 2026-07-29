@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AC3 Katana perf</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+    #stage { height: 80vh; }
+    canvas { width: 100%; height: 100%; display: block; background: #1e293b; }
+    pre { padding: 8px; }
+  </style>
+</head>
+<body>
+  <pre id="out">loading fixture…</pre>
+  <div id="stage"><canvas id="cg"></canvas></div>
+  <script src="/vendor.js"></script>
+  <script src="/widget.js"></script>
+  <script>
+    (async function () {
+      const out = document.getElementById('out');
+      try {
+        const raw = await fetch('/fixtures/katana_from_httpx_upside_com_proposed_nuggets_edges.json').then((r) => r.json());
+        const nodes = (raw.nodes || []).map((n) => ({
+          id: n.id,
+          label: n.label || n.nugget_data || n.id,
+          group: n.kind || n.group || 'entity',
+          colour: n.colour || n.nugget_colour || '#3B82F6',
+          iconLabelFallback: true,
+          shortLabel: n.nugget_type || n.kind || n.id,
+          meta: n,
+          r: 8,
+        }));
+        const links = (raw.edges || raw.links || []).map((e, i) => ({
+          id: e.id || ('e' + i),
+          source: e.source,
+          target: e.target,
+          role: e.relation || e.role || e.name || 'related',
+          label: e.relation || e.role || '',
+        }));
+        const t0 = performance.now();
+        const api = Viz.CanvasGraph.create({
+          canvas: '#cg',
+          nodes,
+          links,
+          variant: 'default',
+          nodeDisplay: 'icons',
+          linkLabels: false,
+        });
+        requestAnimationFrame(() => {
+          const t1 = performance.now();
+          window.__api = api;
+          window.__timing = {
+            mountToFirstFrameMs: t1 - t0,
+            nodes: nodes.length,
+            links: links.length,
+            usingWorker: api.usingWorker(),
+          };
+          out.textContent = 'AC3 READY ' + JSON.stringify(window.__timing);
+          window.__ready = true;
+        });
+      } catch (err) {
+        out.textContent = 'AC3 FAIL ' + err.message;
+      }
+    })();
+  </script>
+</body>
+</html>
