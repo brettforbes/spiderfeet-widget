@@ -129,6 +129,70 @@
     };
   }
 
+  function nodeCollisionRadius(d) {
+    if (d.nodeDisplay === 'icons') {
+      return d.iconSize ? d.iconSize / 2 : 18;
+    }
+    return d.r || 8;
+  }
+
+  /** Same force variants as viz.force.js / canvas-graph.worker.js (shared for main-thread fallback). */
+  const VARIANTS = {
+    default(simulation, width, height) {
+      simulation
+        .force('link', d3.forceLink().id((n) => n.id).distance(80).strength(0.8))
+        .force('charge', d3.forceManyBody().strength(-220))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+    },
+    sparse(simulation, width, height) {
+      simulation
+        .force('link', d3.forceLink().id((n) => n.id).distance(140).strength(0.4))
+        .force('charge', d3.forceManyBody().strength(-120))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+    },
+    dense(simulation, width, height) {
+      simulation
+        .force('link', d3.forceLink().id((n) => n.id).distance(35).strength(0.9))
+        .force('charge', d3.forceManyBody().strength(-400))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collide', d3.forceCollide().radius((d) => nodeCollisionRadius(d) + 4));
+    },
+    grouped(simulation, width, height, nodes) {
+      const groups = [...new Set(nodes.map((n) => n.group))];
+      const centres = new Map(
+        groups.map((g, i) => {
+          const angle = (i / groups.length) * 2 * Math.PI;
+          return [
+            g,
+            {
+              x: width / 2 + 120 * Math.cos(angle),
+              y: height / 2 + 120 * Math.sin(angle),
+            },
+          ];
+        })
+      );
+      simulation
+        .force('link', d3.forceLink().id((n) => n.id).distance(50))
+        .force('charge', d3.forceManyBody().strength(-250))
+        .force('x', d3.forceX((d) => centres.get(d.group).x).strength(0.12))
+        .force('y', d3.forceY((d) => centres.get(d.group).y).strength(0.12));
+    },
+  };
+
+  function startMainThreadSimulation(nodes, links, variant, width, height, linkDistance) {
+    const simulation = d3.forceSimulation(nodes);
+    const applyVariant = VARIANTS[variant] || VARIANTS.default;
+    applyVariant(simulation, width, height, nodes);
+    const linkForce = simulation.force('link');
+    if (linkForce) {
+      linkForce.links(links);
+      if (linkDistance) linkForce.distance(linkDistance);
+    }
+    return simulation;
+  }
+
+  const WORKER_URL = '/workers/canvas-graph.worker.js';
+
   const CanvasGraph = {
     variants: ['default', 'sparse', 'dense', 'grouped'],
 
@@ -386,13 +450,128 @@
       }
       rafId = window.requestAnimationFrame(loop);
 
+      let worker = null;
+      let simulation = null;
+      let useWorker = typeof Worker !== 'undefined' && options.forceMainThread !== true;
+      let reheatTimer = null;
+
+      function applyPositions(positions) {
+        if (!positions || !positions.length) return;
+        positions.forEach((p) => {
+          const n = byId.get(p.id);
+          if (!n) return;
+          n.x = p.x;
+          n.y = p.y;
+        });
+      }
+
+      function postWorker(msg) {
+        if (worker) worker.postMessage(msg);
+      }
+
+      function serializableNodes() {
+        return nodes.map((n) => ({
+          id: n.id,
+          group: n.group,
+          r: n.r,
+          iconSize: n.iconSize,
+          nodeDisplay: n.nodeDisplay,
+          fx: n.fx,
+          fy: n.fy,
+          pinned: n.pinned,
+          x: n.x,
+          y: n.y,
+        }));
+      }
+
+      function serializableLinks() {
+        return links.map((l) => ({
+          source: typeof l.source === 'object' ? l.source.id : l.source,
+          target: typeof l.target === 'object' ? l.target.id : l.target,
+          role: l.role,
+          label: l.label,
+          id: l.id,
+        }));
+      }
+
+      function startWorkerPhysics() {
+        worker = new Worker(WORKER_URL);
+        worker.onmessage = (event) => {
+          const msg = event.data || {};
+          if (msg.type === 'tick') applyPositions(msg.positions);
+          if (msg.type === 'error') {
+            console.warn('CanvasGraph worker error, falling back to main thread:', msg.message);
+            stopWorker();
+            startMainPhysics();
+          }
+        };
+        worker.onerror = (err) => {
+          console.warn('CanvasGraph worker failed, falling back to main thread:', err.message);
+          stopWorker();
+          startMainPhysics();
+        };
+        postWorker({
+          type: 'init',
+          nodes: serializableNodes(),
+          links: serializableLinks(),
+          variant,
+          width,
+          height,
+          linkDistance,
+        });
+      }
+
+      function stopWorker() {
+        if (!worker) return;
+        try {
+          worker.postMessage({ type: 'destroy' });
+        } catch (_) {
+          /* ignore */
+        }
+        try {
+          worker.terminate();
+        } catch (_) {
+          /* ignore */
+        }
+        worker = null;
+        useWorker = false;
+      }
+
+      function startMainPhysics() {
+        if (simulation) simulation.stop();
+        simulation = startMainThreadSimulation(
+          nodes,
+          links,
+          variant,
+          width,
+          height,
+          linkDistance
+        );
+      }
+
+      if (useWorker) {
+        try {
+          startWorkerPhysics();
+        } catch (err) {
+          console.warn('CanvasGraph Worker unavailable, using main thread:', err.message);
+          useWorker = false;
+          startMainPhysics();
+        }
+      } else {
+        startMainPhysics();
+      }
+
       const disconnectResize = Core.observeResize(canvasEl.parentElement || canvasEl, () => {
         if (destroyed) return;
         applyCanvasSize();
+        if (worker) {
+          postWorker({ type: 'resize', width, height });
+        } else if (simulation) {
+          simulation.force('center', d3.forceCenter(width / 2, height / 2));
+          simulation.alpha(0.3).restart();
+        }
       });
 
-      void variant;
-      void linkDistance;
       void onNodeClick;
       void onNodeHover;
       void tooltipEl;
@@ -400,18 +579,53 @@
       return {
         nodes,
         links,
+        usingWorker() {
+          return Boolean(worker);
+        },
         getTransform() {
           return transform;
         },
+        pinNode(id, x, y) {
+          const n = byId.get(id);
+          if (!n) return;
+          n.fx = x;
+          n.fy = y;
+          n.pinned = true;
+          if (worker) postWorker({ type: 'pin', id, x, y });
+          else if (simulation) simulation.alphaTarget(0.3).restart();
+        },
+        unpinNode(id) {
+          const n = byId.get(id);
+          if (!n) return;
+          n.fx = null;
+          n.fy = null;
+          n.pinned = false;
+          if (worker) {
+            postWorker({ type: 'unpin', id });
+          } else if (simulation) {
+            simulation.alphaTarget(0.3).restart();
+            if (reheatTimer) clearTimeout(reheatTimer);
+            reheatTimer = setTimeout(() => {
+              if (simulation) simulation.alphaTarget(0);
+            }, 400);
+          }
+        },
         restart() {
-          /* no physics yet (Epic AC) */
+          if (worker) postWorker({ type: 'reheat' });
+          else if (simulation) simulation.alpha(1).restart();
         },
         destroy() {
           destroyed = true;
           if (rafId) window.cancelAnimationFrame(rafId);
           rafId = 0;
+          if (reheatTimer) clearTimeout(reheatTimer);
           disconnectResize();
           imageCache.clear();
+          if (simulation) {
+            simulation.stop();
+            simulation = null;
+          }
+          stopWorker();
           canvasSel.on('.zoom', null);
           canvasSel.on('dblclick.zoom', null);
           ctx.setTransform(1, 0, 0, 1, 0, 0);

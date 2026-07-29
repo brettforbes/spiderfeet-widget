@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AC2 CanvasGraph worker integration</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: sans-serif; background: #0f172a; color: #e2e8f0; }
+    #stage { height: 70vh; position: relative; }
+    canvas { width: 100%; height: 100%; display: block; background: #1e293b; }
+    pre { padding: 8px 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <pre id="out">starting…</pre>
+  <div id="stage"><canvas id="cg"></canvas></div>
+  <script src="/vendor.js"></script>
+  <script src="/widget.js"></script>
+  <script>
+    (async function () {
+      const out = document.getElementById('out');
+      const log = (l) => { out.textContent += '\n' + l; };
+      const nodes = [];
+      const links = [];
+      for (let i = 0; i < 30; i++) {
+        nodes.push({ id: 'n' + i, group: 'entity', colour: '#38bdf8', r: 8 });
+        if (i) links.push({ source: 'n' + (i - 1), target: 'n' + i, role: 'had' });
+      }
+      const api = window.Viz.CanvasGraph.create({
+        canvas: '#cg',
+        nodes,
+        links,
+        variant: 'default',
+      });
+      await new Promise((r) => setTimeout(r, 800));
+      const moved = api.nodes.some((n) => typeof n.x === 'number' && Math.abs(n.x - 400) > 1);
+      log('usingWorker=' + api.usingWorker());
+      log('positionsMoving=' + moved);
+      api.destroy();
+
+      const apiMain = window.Viz.CanvasGraph.create({
+        canvas: '#cg',
+        nodes: nodes.map((n) => ({ ...n, x: undefined, y: undefined })),
+        links: links.map((l) => ({ ...l })),
+        variant: 'default',
+        forceMainThread: true,
+      });
+      await new Promise((r) => setTimeout(r, 800));
+      const movedMain = apiMain.nodes.some((n) => typeof n.x === 'number');
+      log('mainFallbackWorker=' + apiMain.usingWorker());
+      log('mainFallbackMoving=' + movedMain);
+      apiMain.destroy();
+
+      if (moved && movedMain && apiMain.usingWorker() === false) {
+        log('AC2 VERIFY PASS');
+      } else {
+        log('AC2 VERIFY FAIL');
+      }
+    })();
+  </script>
+</body>
+</html>
