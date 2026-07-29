@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AC1 worker smoke</title>
+</head>
+<body>
+  <pre id="out">starting…</pre>
+  <script>
+    (async function () {
+      const out = document.getElementById('out');
+      const log = (line) => { out.textContent += '\n' + line; };
+      try {
+        const worker = new Worker('/workers/canvas-graph.worker.js');
+        let ticks = 0;
+        let firstTick = null;
+        const done = new Promise((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('timeout waiting for ticks')), 15000);
+          worker.onmessage = (ev) => {
+            const msg = ev.data || {};
+            if (msg.type === 'error') {
+              clearTimeout(t);
+              reject(new Error(msg.message));
+              return;
+            }
+            if (msg.type === 'ready') log('worker ready');
+            if (msg.type === 'tick') {
+              ticks += 1;
+              if (!firstTick) firstTick = msg;
+              if (ticks >= 5) {
+                clearTimeout(t);
+                resolve(msg);
+              }
+            }
+          };
+          worker.onerror = (e) => {
+            clearTimeout(t);
+            reject(e.error || new Error(e.message || 'worker error'));
+          };
+        });
+        // Small fixture (Katana-sized optional via query); default tiny for smoke.
+        const nodes = [];
+        const links = [];
+        for (let i = 0; i < 40; i++) {
+          nodes.push({ id: 'n' + i, group: 'entity', r: 8 });
+          if (i) links.push({ source: 'n' + (i - 1), target: 'n' + i });
+        }
+        worker.postMessage({ type: 'init', nodes, links, variant: 'default', width: 800, height: 500 });
+        const last = await done;
+        log('ticks=' + ticks);
+        log('sample=' + JSON.stringify(last.positions.slice(0, 3)));
+        log('AC1 VERIFY PASS');
+        worker.postMessage({ type: 'destroy' });
+        worker.terminate();
+      } catch (err) {
+        log('AC1 VERIFY FAIL: ' + (err && err.message ? err.message : String(err)));
+      }
+    })();
+  </script>
+</body>
+</html>
