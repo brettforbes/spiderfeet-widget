@@ -317,47 +317,9 @@ window.Widgets.Profiling = window.Widgets.Profiling || {};
   };
 
   Profiling.renderProposalGraph = function (proposal) {
+    // Legacy SVG ForceGraph path removed (SPEC-009 AG1). Graph UI lives in CliScanApp + CanvasGraph.
     Profiling._lastGraphProposal = proposal;
-    const generation = ++Profiling._graphRenderGeneration;
     Profiling.destroyGraph();
-
-    const stage = document.getElementById('profiling-graph-stage');
-    const stats = document.getElementById('profiling-graph-stats');
-    const svgEl = document.getElementById('profiling-graph-svg');
-    if (!stage || !svgEl || !window.Viz?.ForceGraph) return;
-
-    Profiling.setShadowToggleStates();
-    const displayProposal = Profiling.applyShadowOptions(proposal);
-    const { nodes, links } = Profiling.transformProposalGraph(displayProposal);
-    if (!nodes.length) {
-      window.Viz.Core.clear(window.Viz.Core.selectSvg(svgEl));
-      if (stats) stats.textContent = 'No proposed graph';
-      Profiling.renderLegend();
-      return;
-    }
-
-    Profiling.whenGraphStageReady(() => {
-      if (generation !== Profiling._graphRenderGeneration) return;
-      try {
-        Profiling._graphInstance = window.Viz.ForceGraph.create({
-          svg: '#profiling-graph-svg',
-          tooltip: '#profiling-graph-tooltip',
-          nodes,
-          links,
-          variant: 'default',
-          nodeDisplay: 'icons',
-          linkLabels: true,
-          linkDistance: (l) => (l.role === 'had' ? 40 : 80),
-        });
-        const shadowCount = displayProposal.shadow_meta?.shadow_count || 0;
-        const shadowText = shadowCount ? ` · ${shadowCount} shadows` : '';
-        if (stats) stats.textContent = `${nodes.length} nodes · ${links.length} links${shadowText}`;
-        Profiling.renderLegend();
-      } catch (err) {
-        console.error('Profiling.renderProposalGraph failed', err);
-        if (stats) stats.textContent = `Graph error: ${err.message}`;
-      }
-    });
   };
 
   // Structured Data Viewer lives inside CliScanApp (view mode). Legacy profiling iframe removed.
