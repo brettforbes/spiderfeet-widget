@@ -1,6 +1,8 @@
 /**
  * Viz.CanvasGraph — canvas-rendered force graph (SPEC-009).
- * AB1: scaffold + zoom/resize + rAF draw loop (static positions; physics = Epic AC).
+ * AB1: scaffold + zoom/resize + rAF draw loop.
+ * AB2: node/link drawing parity with Viz.ForceGraph.
+ * Physics offload = Epic AC; hit-testing = AB3.
  */
 (function (global) {
   'use strict';
@@ -34,6 +36,99 @@
     return { s, t };
   }
 
+  function nodeFill(d, colour) {
+    if (d.colour) return d.colour;
+    if (d.fill) return d.fill;
+    return colour(d.group);
+  }
+
+  function linkStroke(l) {
+    if (l.role === 'consumed') return '#64748b';
+    if (l.role === 'produced') return '#0ea5e9';
+    if (l.role === 'had') return '#94a3b8';
+    if (l.role === 'contains') return '#64748b';
+    if (l.role === 'listens-to') return '#0ea5e9';
+    return '#999';
+  }
+
+  function linkDash(l) {
+    if (l.role === 'consumed' || l.role === 'had') return [4, 3];
+    return null;
+  }
+
+  /** Match Viz.ForceGraph.formatNuggetTitle line wrapping. */
+  function formatNuggetFallbackLines(raw) {
+    const words = String(raw || '')
+      .split('_')
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+    if (!words.length) return ['?'];
+    if (words.length <= 3) return words;
+    const lines = [];
+    let buf = '';
+    words.forEach((w) => {
+      const next = buf ? `${buf} ${w}` : w;
+      if (next.length > 12 && buf) {
+        lines.push(buf);
+        buf = w;
+      } else {
+        buf = next;
+      }
+    });
+    if (buf) lines.push(buf);
+    return lines.slice(0, 4);
+  }
+
+  function drawRoundedRect(ctx, x, y, w, h, r) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+
+  function drawCenteredLabelText(ctx, lines, size) {
+    const lineCount = Math.max(lines.length, 1);
+    const fontSize = lineCount > 3 ? 5 : lineCount > 2 ? 5.5 : 6.5;
+    const lineHeight = fontSize * 1.05;
+    const startY = -((lineCount - 1) * lineHeight) / 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `600 ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, 0, startY + i * lineHeight, size - 4);
+    });
+  }
+
+  function createImageCache() {
+    const cache = new Map();
+    return {
+      get(url) {
+        if (!url) return null;
+        let entry = cache.get(url);
+        if (entry) return entry;
+        entry = { img: new Image(), ready: false, failed: false };
+        entry.img.decoding = 'async';
+        entry.img.onload = () => {
+          entry.ready = true;
+        };
+        entry.img.onerror = () => {
+          entry.failed = true;
+        };
+        entry.img.src = url;
+        cache.set(url, entry);
+        return entry;
+      },
+      clear() {
+        cache.clear();
+      },
+    };
+  }
+
   const CanvasGraph = {
     variants: ['default', 'sparse', 'dense', 'grouped'],
 
@@ -57,6 +152,7 @@
       }
       const ctx = canvasEl.getContext('2d');
       const tooltipEl = tooltipSelector ? resolveEl(tooltipSelector) : null;
+      const imageCache = createImageCache();
 
       const { nodes, links } = Core.cloneGraph({
         nodes: rawNodes || [],
@@ -65,6 +161,8 @@
       nodes.forEach((n) => {
         n.nodeDisplay = nodeDisplay;
       });
+      const groups = [...new Set(nodes.map((n) => n.group))];
+      const colour = Core.colourByGroup(groups);
       const byId = new Map(nodes.map((n) => [n.id, n]));
       links.forEach((l) => {
         if (typeof l.source !== 'object') l.source = byId.get(l.source) || l.source;
@@ -102,7 +200,142 @@
       canvasSel.call(zoom);
       canvasSel.on('dblclick.zoom', null);
 
-      function drawStubFrame() {
+      function drawLabelFallback(d) {
+        const size = d.iconSize || 28;
+        const fill = d.colour || '#3B82F6';
+        const lines = formatNuggetFallbackLines(d.shortLabel || d.label || d.id);
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        if (d.isShadow) ctx.globalAlpha = 0.55;
+        drawRoundedRect(ctx, -size / 2, -size / 2, size, size, 4);
+        ctx.fillStyle = fill;
+        ctx.fill();
+        drawCenteredLabelText(ctx, lines, size);
+        ctx.restore();
+      }
+
+      function drawIconNode(d) {
+        const size = d.iconSize || 28;
+        const hitR = size / 2;
+        if (d.iconLabelFallback || !d.iconUrl) {
+          drawLabelFallback(d);
+          return;
+        }
+        const entry = imageCache.get(d.iconUrl);
+        if (entry?.failed && d.iconFallbackUrl) {
+          const fb = imageCache.get(d.iconFallbackUrl);
+          if (fb?.failed || (!fb?.ready && !entry.ready)) {
+            drawLabelFallback(d);
+            return;
+          }
+        }
+        if (entry?.failed && !d.iconFallbackUrl) {
+          drawLabelFallback(d);
+          return;
+        }
+        const readyEntry =
+          entry?.ready
+            ? entry
+            : d.iconFallbackUrl && imageCache.get(d.iconFallbackUrl)?.ready
+              ? imageCache.get(d.iconFallbackUrl)
+              : null;
+        if (!readyEntry) {
+          // Placeholder while decoding — coloured rect matching icon bg.
+          ctx.save();
+          ctx.translate(d.x, d.y);
+          if (d.isShadow) ctx.globalAlpha = 0.55;
+          if (d.group === 'service') {
+            const quarantineRing = Boolean(d.originRing);
+            const ringColour = quarantineRing
+              ? d.originColour || '#7C3AED'
+              : d.fixtureColour || d.colour || '#57534E';
+            ctx.beginPath();
+            ctx.arc(0, 0, hitR + 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.strokeStyle = ringColour;
+            ctx.lineWidth = 3;
+            if (quarantineRing) ctx.setLineDash([5, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          } else {
+            drawRoundedRect(ctx, -size / 2, -size / 2, size, size, 4);
+            ctx.fillStyle = d.colour || '#3B82F6';
+            ctx.fill();
+          }
+          ctx.restore();
+          return;
+        }
+
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        if (d.isShadow) ctx.globalAlpha = 0.55;
+        if (d.group === 'service') {
+          const quarantineRing = Boolean(d.originRing);
+          const ringColour = quarantineRing
+            ? d.originColour || '#7C3AED'
+            : d.fixtureColour || d.colour || '#57534E';
+          ctx.beginPath();
+          ctx.arc(0, 0, hitR + 4, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = ringColour;
+          ctx.lineWidth = 3;
+          if (quarantineRing) ctx.setLineDash([5, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          drawRoundedRect(ctx, -size / 2, -size / 2, size, size, 4);
+          ctx.fillStyle = d.colour || '#3B82F6';
+          ctx.fill();
+        }
+        ctx.drawImage(readyEntry.img, -size / 2, -size / 2, size, size);
+        if (d.pinned) {
+          ctx.beginPath();
+          ctx.arc(0, 0, hitR + (d.group === 'service' ? 4 : 0) + 2, 0, Math.PI * 2);
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawCircleNode(d) {
+        const r = d.r || 8;
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        if (d.isShadow) ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = nodeFill(d, colour);
+        ctx.fill();
+        if (d.group === 'service') {
+          const quarantineRing = Boolean(d.originRing);
+          const ringColour = quarantineRing
+            ? d.originColour || '#7C3AED'
+            : d.fixtureColour || d.colour || '#57534E';
+          ctx.strokeStyle = ringColour;
+          ctx.lineWidth = 2.5;
+          if (quarantineRing) ctx.setLineDash([5, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        if (d.pinned) {
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawNode(d) {
+        if (nodeDisplay === 'icons') drawIconNode(d);
+        else drawCircleNode(d);
+      }
+
+      function drawFrame() {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -114,32 +347,41 @@
         ctx.translate(transform.x, transform.y);
         ctx.scale(transform.k, transform.k);
 
-        // AB1 stub: simple circles + lines (AB2 replaces with full drawing parity).
-        ctx.lineWidth = 1.5 / transform.k;
-        ctx.strokeStyle = '#999';
+        const invK = 1 / transform.k;
         links.forEach((link) => {
           const { s, t } = linkEndpoints(link, byId);
           if (!s || !t) return;
           ctx.beginPath();
           ctx.moveTo(s.x, s.y);
           ctx.lineTo(t.x, t.y);
+          ctx.strokeStyle = linkStroke(link);
+          ctx.lineWidth = 1.5 * invK;
+          const dash = linkDash(link);
+          if (dash) ctx.setLineDash(dash.map((v) => v * invK));
+          else ctx.setLineDash([]);
           ctx.stroke();
+          ctx.setLineDash([]);
+
+          if (linkLabels) {
+            const label = link.label || link.role || '';
+            if (!label) return;
+            const mx = (s.x + t.x) / 2;
+            const my = (s.y + t.y) / 2;
+            ctx.fillStyle = '#475569';
+            ctx.font = `${9 * invK}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, mx, my);
+          }
         });
 
-        nodes.forEach((node) => {
-          const r = node.r || 8;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = node.colour || node.fill || '#3B82F6';
-          ctx.fill();
-        });
-
+        nodes.forEach(drawNode);
         ctx.restore();
       }
 
       function loop() {
         if (destroyed) return;
-        drawStubFrame();
+        drawFrame();
         rafId = window.requestAnimationFrame(loop);
       }
       rafId = window.requestAnimationFrame(loop);
@@ -149,9 +391,7 @@
         applyCanvasSize();
       });
 
-      // Stash for later epics (AC/AB3); unused in AB1 beyond API surface.
       void variant;
-      void linkLabels;
       void linkDistance;
       void onNodeClick;
       void onNodeHover;
@@ -171,6 +411,7 @@
           if (rafId) window.cancelAnimationFrame(rafId);
           rafId = 0;
           disconnectResize();
+          imageCache.clear();
           canvasSel.on('.zoom', null);
           canvasSel.on('dblclick.zoom', null);
           ctx.setTransform(1, 0, 0, 1, 0, 0);
