@@ -159,7 +159,7 @@ module.exports = {
                 paths.src + '/js/shell.js',
                 paths.src + '/js/theme.js',
                 paths.src + '/js/viz.core.js',
-                paths.src + '/js/viz.force.js',
+                paths.src + '/js/canvas-graph.js',
                 paths.src + '/js/graph-shadows.js',
                 paths.src + '/js/map.js',
                 paths.src + '/js/subscriptions.js',

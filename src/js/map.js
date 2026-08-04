@@ -490,8 +490,12 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map._mountGraph = function (nodes, links) {
-    Map._graphInstance = Viz.ForceGraph.create({
-      svg: '#graph',
+    if (Map._graphInstance?.destroy) {
+      Map._graphInstance.destroy();
+      Map._graphInstance = null;
+    }
+    Map._graphInstance = Viz.CanvasGraph.create({
+      canvas: '#graph',
       tooltip: '#tooltip',
       nodes,
       links,
@@ -542,7 +546,7 @@ window.Widgets.Map = window.Widgets.Map || {};
   };
 
   Map.setVariant = function (variant) {
-    if (!Viz.ForceGraph.variants.includes(variant)) return;
+    if (!Viz.CanvasGraph.variants.includes(variant)) return;
     Map._variant = variant;
     Map.setVariantButtons(variant);
     if (Map._connected) {

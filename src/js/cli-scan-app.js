@@ -1,3 +1,27 @@
+/**
+ * CliScanApp — reusable 5-tab CLI/API Scan UI component (SPEC-008).
+ *
+ * Tabs: Scan | Text | Structured | Graph | Report
+ *
+ * Mount anywhere (Profiling, Composer, or a future host):
+ *
+ *   const app = window.Widgets.CliScanApp.create({
+ *     container: mountEl,          // required Element
+ *     toolId: 'nmap',              // required for options-schema load
+ *     mode: 'view' | 'edit-run',   // view = read-only examination; edit-run = live form
+ *     scenarioKey: 'capstone_…',   // optional label
+ *     detail: scenarioDetail,      // optional examination payload (text/structured/graph/md)
+ *     instanceId: 'my-scan',       // optional; unique per concurrent mount
+ *     dataSource: {
+ *       contentBase: '/content',   // options-schema + markdown docs
+ *       corpusBase: '/cli-corpus', // unused by component today; reserved for hosts
+ *     },
+ *   });
+ *   // later: app.reload({ toolId, detail, mode }); app.destroy();
+ *
+ * Host pages own chrome around the mount. Graph fullscreen toggles
+ * `.profiling-graph-host-fullscreen` on `container` so any host can style it.
+ */
 window.Widgets = window.Widgets || {};
 window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
 
@@ -65,6 +89,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       schema: null,
       manifest: null,
       values: {},
+      rows: [],
       graphInstance: null,
       graphRenderGeneration: 0,
       shadowDescriptors: false,
@@ -96,6 +121,17 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       state.graphInstance.destroy();
       state.graphInstance = null;
     }
+    if (state.viewer?.destroy) {
+      state.viewer.destroy();
+      state.viewer = null;
+    }
+    if (state._themeChangedListener) {
+      window.removeEventListener('shell:theme-changed', state._themeChangedListener);
+      state._themeChangedListener = null;
+    }
+    (state._tabListeners || []).forEach(({ tab, fn }) => tab.removeEventListener('shown.bs.tab', fn));
+    state._tabListeners = [];
+    state._destroyed = true;
     CliScanApp._instances.delete(state.instanceId);
   };
 
@@ -114,15 +150,27 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}/options-schema`),
         Connection.fetchJson(`${state.contentBase}/tools/${encodeURIComponent(state.toolId)}`),
       ]);
+      // `destroy()` runs synchronously (from Profiling.resetDetailChrome) the
+      // instant a new scenario is opened, but this fetch may still be in
+      // flight. Without this guard the stale continuation below still runs
+      // after destroy, calling ensureViewer() -> DataViewerHost.create() for
+      // an instanceId that already has a live binding — leaking a full set of
+      // window listeners ('data-viewer:ready' et al.) per switch, which
+      // compounds into a runaway postMessage/theme-changed storm.
+      if (state._destroyed) return;
       state.schema = schema;
       state.manifest = manifest;
     } catch (err) {
+      if (state._destroyed) return;
       console.warn('CliScanApp: content API unavailable, Scan tab limited', err);
       state.schema = { tool_id: state.toolId, groups: ['General'], flags: [] };
       state.manifest = { tool_id: state.toolId, executable: state.toolId };
     }
-    state.values = CliScanApp._initialValues(state.schema, state.detail);
+    const initial = CliScanApp._initialValues(state.schema, state.detail);
+    state.values = initial.values;
+    state.rows = initial.rows;
 
+    CliScanApp._syncRunButton(container, state);
     CliScanApp._renderScanForm(container, state);
     CliScanApp._updateCommandPreview(container, state);
 
@@ -145,13 +193,14 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#${id}-pane-report" type="button" role="tab">Report</button></li>
   </ul>
   <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom min-h-0 cli-scan-tab-content">
-    <div class="tab-pane fade show active h-100" id="${id}-pane-scan" role="tabpanel">
-      <div class="row g-0 h-100">
-        <div class="col-12 col-lg-9 border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-form></div>
-        <div class="col-12 col-lg-3 cli-scan-rail p-3 d-flex flex-column gap-2">
-          <div class="d-grid gap-2" data-cli-scan-rail-actions></div>
-          <label class="small fw-semibold mt-2">Command preview</label>
-          <pre class="cli-scan-command-preview small bg-body-secondary bg-opacity-25 border rounded p-2 mb-0" data-cli-scan-command></pre>
+    <div class="tab-pane fade show active h-100 min-h-0" id="${id}-pane-scan" role="tabpanel">
+      <div class="row g-0 h-100 min-h-0 cli-scan-scan-layout">
+        <div class="col-12 col-lg-10 border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-options-palette></div>
+        <div class="col-12 col-lg-2 cli-scan-rail cli-scan-command-palette p-2 d-flex flex-column gap-2 min-h-0">
+          <div class="d-grid gap-2 flex-shrink-0" data-cli-scan-rail-actions></div>
+          <label class="small fw-semibold mt-2 flex-shrink-0">Command preview</label>
+          <pre class="cli-scan-command-preview small bg-body-secondary bg-opacity-25 border rounded p-2 mb-0 flex-grow-1" data-cli-scan-command></pre>
+          <button type="button" class="btn btn-success btn-sm mt-auto flex-shrink-0" data-cli-scan-run>Scan Now</button>
         </div>
       </div>
     </div>
@@ -173,7 +222,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           <button type="button" class="btn btn-sm btn-outline-secondary" data-cli-scan-graph-fullscreen>Full screen</button>
         </div>
         <div class="profiling-graph-stage flex-grow-1 position-relative min-h-0" data-cli-scan-graph-stage>
-          <svg id="${id}-graph-svg" class="profiling-graph-svg viz-layer" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></svg>
+          <canvas id="${id}-graph-svg" class="profiling-graph-svg viz-layer w-100 h-100" role="img" aria-label="Proposed nugget graph" data-cli-scan-graph-svg></canvas>
           <div id="${id}-graph-tooltip" class="profiling-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm" hidden data-cli-scan-graph-tooltip></div>
           <div class="position-absolute bottom-0 end-0 m-2 p-2 border rounded bg-body small shadow-sm" data-cli-scan-graph-legend aria-label="Graph legend"></div>
         </div>
@@ -203,111 +252,390 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       state.graphFullscreen = !state.graphFullscreen;
       container.classList.toggle('profiling-graph-host-fullscreen', state.graphFullscreen);
     });
+    state._tabListeners = [];
     container.querySelectorAll('.cli-scan-tabs [data-bs-toggle="tab"]').forEach((tab) => {
-      tab.addEventListener('shown.bs.tab', () => {
+      const fn = () => {
         if (tab.id === `${state.instanceId}-tab-graph` && state.detail?.graph_proposal) {
           setTimeout(() => CliScanApp.renderProposalGraph(container, state, state.detail.graph_proposal), 50);
         }
-      });
+      };
+      tab.addEventListener('shown.bs.tab', fn);
+      state._tabListeners.push({ tab, fn });
     });
-    window.addEventListener('shell:theme-changed', () => {
+    // Stored on state (not an inline arrow) so CliScanApp.destroy can remove it —
+    // otherwise every reopened scenario leaks another window listener, and
+    // DataViewer's `data-viewer-theme-changed` echo (Theme.apply always fires
+    // `shell:theme-changed`, even for fromViewer:true) turns N leaked listeners
+    // into an ever-growing storm of redundant setData/postMessage round-trips.
+    state._themeChangedListener = () => {
       if (state.detail?.structured?.content) CliScanApp.pushStructuredToViewer(container, state);
-    });
+    };
+    window.addEventListener('shell:theme-changed', state._themeChangedListener);
   };
 
   CliScanApp._wireRail = function (container, state) {
     const actions = container.querySelector('[data-cli-scan-rail-actions]');
-    if (!actions) return;
-    actions.innerHTML = `
+    if (actions) {
+      actions.innerHTML = `
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="options">Options</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="graph-structure">Graph Structure</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-cli-scan-modal-btn="zero-to-hero">User Guide</button>`;
 
-    actions.querySelectorAll('[data-cli-scan-modal-btn]').forEach((btn) => {
-      btn.addEventListener('click', () => CliScanApp._openModal(container, state, btn.dataset.cliScanModalBtn));
+      actions.querySelectorAll('[data-cli-scan-modal-btn]').forEach((btn) => {
+        btn.addEventListener('click', () => CliScanApp._openModal(container, state, btn.dataset.cliScanModalBtn));
+      });
+    }
+    CliScanApp._syncRunButton(container, state);
+  };
+
+  /** Keep Scan Now / Scan Complete in sync when hosts reload with a new mode. */
+  CliScanApp._syncRunButton = function (container, state) {
+    const runBtn = container.querySelector('[data-cli-scan-run]');
+    if (!runBtn) return;
+    if (runBtn._cliScanRunHandler) {
+      runBtn.removeEventListener('click', runBtn._cliScanRunHandler);
+      runBtn._cliScanRunHandler = null;
+    }
+    if (state.mode === 'view') {
+      runBtn.classList.add('active');
+      runBtn.setAttribute('aria-pressed', 'true');
+      runBtn.disabled = true;
+      runBtn.title = 'This scan was already executed — Scan tab is read-only.';
+      runBtn.textContent = 'Scan Complete';
+      return;
+    }
+    runBtn.classList.remove('active');
+    runBtn.removeAttribute('aria-pressed');
+    runBtn.disabled = false;
+    runBtn.title = 'Submit the command preview for execution';
+    runBtn.textContent = 'Scan Now';
+    runBtn._cliScanRunHandler = () => {
+      CliScanApp._setStatus(container, state, 'Scan Now is not wired to live execution in this build.');
+    };
+    runBtn.addEventListener('click', runBtn._cliScanRunHandler);
+  };
+
+  CliScanApp._deriveShortName = function (source) {
+    const desc = String(source || '').trim();
+    if (!desc) return '';
+    let name = desc.split(/\s[-–—]\s/, 1)[0];
+    name = name.split(/[.;]\s+/, 1)[0];
+    if (name.length > 48) name = name.slice(0, 45).trimEnd() + '…';
+    return name;
+  };
+
+  // Expand a schema flag into one or more UI row descriptors. Handles:
+  //   "-sS/sT/sA/sW/sM"        → 5 mutex rows (valueMode='none')
+  //   "-oN/-oX/-oS/-oG <file>" → 4 mutex rows (valueMode='space')
+  //   "-T<0-5>"                → 1 row (valueMode='attached')
+  //   "--top-ports <number>"   → 1 row (valueMode='space')
+  //   "--open" | "-A" | "-sn"  → 1 row (valueMode='none')
+  //   flag === null            → 1 positional row (valueMode='space')
+  CliScanApp._expandFlag = function (flag) {
+    if (flag.flag == null) {
+      return [{
+        key: flag.id,
+        flag,
+        displayToken: `<${flag.id}>`,
+        valueMode: 'space',
+        isPositional: true,
+        mutexGroup: flag.mutex_group || null,
+        placeholder: flag.placeholder || null,
+      }];
+    }
+    const raw = String(flag.flag).trim();
+    const placeholderMatch = raw.match(/<([^>]+)>/);
+    const placeholder = placeholderMatch ? placeholderMatch[1] : flag.placeholder || null;
+
+    let valueMode;
+    if (/[A-Za-z0-9]<[^>]+>$/.test(raw)) valueMode = 'attached';
+    else if (/\s+<[^>]+>$/.test(raw)) valueMode = 'space';
+    else if (['select', 'integer', 'float', 'path'].includes(flag.type)) valueMode = 'space';
+    else valueMode = 'none';
+
+    const head = raw.replace(/\s+<[^>]+>$/, '').replace(/<[^>]+>$/, '');
+    const parts = head.split('/').filter(Boolean);
+    if (parts.length <= 1) {
+      return [{
+        key: flag.id,
+        flag,
+        displayToken: head,
+        valueMode,
+        mutexGroup: flag.mutex_group || null,
+        placeholder,
+      }];
+    }
+    const firstPrefix = (parts[0].match(/^-{1,2}/) || ['-'])[0];
+    const tokens = parts.map((p, i) => (i === 0 ? p : (p.startsWith('-') ? p : firstPrefix + p)));
+    const mutexGroup = flag.mutex_group || `mx_${flag.id}`;
+    return tokens.map((tok, i) => ({
+      key: `${flag.id}__${i}`,
+      flag,
+      displayToken: tok,
+      valueMode,
+      mutexGroup,
+      placeholder,
+    }));
+  };
+
+  CliScanApp._buildRows = function (schema) {
+    const rows = [];
+    (schema?.flags || []).forEach((f) => {
+      CliScanApp._expandFlag(f).forEach((r) => rows.push(r));
     });
+    return rows;
+  };
+
+  CliScanApp._detectRowInCommand = function (row, cmdParts) {
+    const tok = row.displayToken;
+    if (!tok || row.isPositional) return null;
+    for (let i = 0; i < cmdParts.length; i += 1) {
+      const p = cmdParts[i];
+      if (p === tok) {
+        if (row.valueMode === 'none') return { enabled: true, value: '' };
+        const next = cmdParts[i + 1];
+        const looksLikeFlag = next != null && next !== '-' && next.startsWith('-') && next.length > 1;
+        if (next == null || looksLikeFlag) return { enabled: true, value: '' };
+        return { enabled: true, value: next };
+      }
+      if (row.valueMode === 'space' && p.startsWith(tok + '=')) {
+        return { enabled: true, value: p.slice(tok.length + 1) };
+      }
+      if (row.valueMode === 'attached' && p.length > tok.length && p.startsWith(tok)) {
+        return { enabled: true, value: p.slice(tok.length) };
+      }
+    }
+    return null;
+  };
+
+  CliScanApp._chooseColCount = function (flagCount) {
+    if (flagCount <= 3) return 1;
+    if (flagCount <= 10) return 2;
+    return 3;
+  };
+
+  CliScanApp._distributeFlags = function (flags, cols) {
+    const perCol = Math.ceil(flags.length / cols) || 1;
+    const buckets = Array.from({ length: cols }, () => []);
+    flags.forEach((f, i) => {
+      const idx = Math.min(cols - 1, Math.floor(i / perCol));
+      buckets[idx].push(f);
+    });
+    return buckets;
   };
 
   CliScanApp._initialValues = function (schema, detail) {
     const values = {};
-    (schema?.flags || []).forEach((f) => {
-      values[f.id] = f.default ?? (f.type === 'boolean' ? false : '');
+    const cmd = String(detail?.command || '').trim();
+    const cmdParts = cmd ? cmd.split(/\s+/) : [];
+    const rows = CliScanApp._buildRows(schema);
+    rows.forEach((row) => {
+      let detected = null;
+      if (cmdParts.length) detected = CliScanApp._detectRowInCommand(row, cmdParts);
+      if (row.isPositional) {
+        let posVal = '';
+        for (let i = 0; i < cmdParts.length; i += 1) {
+          const p = cmdParts[i];
+          if (i === 0) continue;
+          if (p.startsWith('-')) continue;
+          const prev = cmdParts[i - 1];
+          if (prev && prev.startsWith('-') && prev !== '-') continue;
+          posVal = p;
+          break;
+        }
+        values[row.key] = {
+          enabled: Boolean(posVal) || Boolean(row.flag.required),
+          value: posVal,
+        };
+        return;
+      }
+      const defaultEnabled = Boolean(row.flag.default);
+      values[row.key] = detected
+        ? detected
+        : {
+          enabled: defaultEnabled,
+          value: row.valueMode !== 'none' && typeof row.flag.default === 'string' ? row.flag.default : '',
+        };
     });
-    if (detail?.command) {
-      values.__captured_command = detail.command.trim();
-    }
-    return values;
+    if (cmd) values.__captured_command = cmd;
+    return { values, rows };
   };
 
   CliScanApp._renderScanForm = function (container, state) {
-    const root = container.querySelector('[data-cli-scan-form]');
+    const root = container.querySelector('[data-cli-scan-options-palette]');
     if (!root || !state.schema) return;
     const readOnly = state.mode === 'view';
-    const groups = state.schema.groups || ['General'];
-    const byGroup = {};
-    groups.forEach((g) => { byGroup[g] = []; });
-    (state.schema.flags || []).forEach((flag) => {
-      const g = flag.group || 'General';
-      if (!byGroup[g]) byGroup[g] = [];
-      byGroup[g].push(flag);
+
+    const rows = state.rows || [];
+    const groupOrder = [];
+    const byGroup = new Map();
+    rows.forEach((row) => {
+      const g = row.flag.group || 'General';
+      if (!byGroup.has(g)) {
+        byGroup.set(g, []);
+        groupOrder.push(g);
+      }
+      byGroup.get(g).push(row);
     });
 
     const parts = [];
     if (readOnly && state.values.__captured_command) {
-      parts.push(`<p class="small text-body-secondary">Captured examination command (read-only view mode).</p>`);
+      parts.push(
+        `<p class="small text-body-secondary mb-2">Captured examination command (read-only view mode). Boxes and values reflect flags detected in the captured command.</p>`
+      );
     }
 
-    groups.forEach((groupName, gi) => {
-      const flags = byGroup[groupName] || [];
-      if (!flags.length) return;
-      const collapse = flags.length > 10;
-      const body = flags.map((f) => CliScanApp._fieldHtml(f, state, readOnly)).join('');
-      if (collapse) {
-        parts.push(`<div class="accordion mb-2" id="${state.instanceId}-acc-${gi}"><div class="accordion-item"><h2 class="accordion-header"><button class="accordion-button${gi ? ' collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#${state.instanceId}-acc-body-${gi}">${escHtml(groupName)}</button></h2><div id="${state.instanceId}-acc-body-${gi}" class="accordion-collapse collapse${gi ? '' : ' show'}"><div class="accordion-body">${body}</div></div></div></div>`);
-      } else {
-        parts.push(`<fieldset class="mb-3"><legend class="h6">${escHtml(groupName)}</legend>${body}</fieldset>`);
-      }
+    const positionalRows = rows.filter((r) => r.isPositional);
+    if (positionalRows.length) {
+      const html = positionalRows.map((r) => CliScanApp._positionalRowHtml(r, state, readOnly)).join('');
+      parts.push(
+        `<section class="cli-opt-section cli-opt-section-positional mb-3"><h3 class="cli-opt-section-title h6 mb-2">Target</h3>${html}</section>`
+      );
+    }
+
+    const sectionHtml = [];
+    groupOrder.forEach((groupName) => {
+      const groupRows = (byGroup.get(groupName) || []).filter((r) => !r.isPositional);
+      if (!groupRows.length) return;
+      const cols = CliScanApp._chooseColCount(groupRows.length);
+      const buckets = CliScanApp._distributeFlags(groupRows, cols);
+      const bucketHtml = buckets
+        .map(
+          (bucket) =>
+            `<div class="cli-opt-col">${bucket
+              .map((r) => CliScanApp._optionRowHtml(r, state, readOnly))
+              .join('')}</div>`
+        )
+        .join('');
+      sectionHtml.push(
+        `<section class="cli-opt-section" data-cli-opt-section="${escHtml(groupName)}">
+          <h3 class="cli-opt-section-title h6 mb-2">${escHtml(groupName)}</h3>
+          <div class="cli-opt-section-cols cli-opt-section-cols-${cols}">${bucketHtml}</div>
+        </section>`
+      );
     });
-
-    const advanced = (state.schema.flags || []).filter((f) => f.advanced);
-    if (advanced.length) {
-      const advBody = advanced.map((f) => CliScanApp._fieldHtml(f, state, readOnly)).join('');
-      parts.push(`<details class="mb-2"><summary class="fw-semibold">Advanced options</summary><div class="mt-2">${advBody}</div></details>`);
-    }
+    parts.push(`<div class="cli-opt-palette">${sectionHtml.join('')}</div>`);
 
     root.innerHTML = parts.join('');
-    root.querySelectorAll('[data-cli-scan-field]').forEach((el) => {
-      el.addEventListener('input', () => {
-        state.values[el.dataset.cliScanField] = el.type === 'checkbox' ? el.checked : el.value;
-        CliScanApp._updateCommandPreview(container, state);
-      });
-      el.addEventListener('change', () => {
-        state.values[el.dataset.cliScanField] = el.type === 'checkbox' ? el.checked : el.value;
+    CliScanApp._wireOptionRows(container, state);
+  };
+
+  CliScanApp._optionRowHtml = function (row, state, readOnly) {
+    const flag = row.flag;
+    const rowId = `${state.instanceId}-f-${row.key.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const token = row.displayToken;
+    const takesValue = row.valueMode !== 'none';
+    const current = state.values[row.key] || { enabled: false, value: '' };
+    const dis = readOnly ? ' disabled' : '';
+    const req = flag.required
+      ? ' <span class="cli-opt-required text-danger" aria-hidden="true" title="required">*</span>'
+      : '';
+    const mutex = row.mutexGroup ? ` name="${escHtml(state.instanceId + '-mx-' + row.mutexGroup)}"` : '';
+    const inputType = row.mutexGroup ? 'radio' : 'checkbox';
+    const checked = current.enabled ? ' checked' : '';
+    const tooltipText = escHtml(flag.description || '');
+    const shortName = escHtml(CliScanApp._deriveShortName(flag.description));
+
+    let valueControl = '';
+    if (takesValue) {
+      const hidden = current.enabled ? '' : ' d-none';
+      const placeholder = escHtml(row.placeholder || 'value');
+      if (flag.type === 'select' && Array.isArray(flag.choices)) {
+        const opts = ['<option value="">—</option>']
+          .concat(
+            flag.choices.map(
+              (c) => `<option value="${escHtml(c)}"${current.value === c ? ' selected' : ''}>${escHtml(c)}</option>`
+            )
+          )
+          .join('');
+        valueControl = `<select class="form-select form-select-sm cli-opt-value${hidden}" data-cli-opt-value data-cli-opt-row-key="${escHtml(row.key)}"${dis}>${opts}</select>`;
+      } else if (flag.type === 'integer' || flag.type === 'float') {
+        valueControl = `<input class="form-control form-control-sm cli-opt-value${hidden}" type="number" data-cli-opt-value data-cli-opt-row-key="${escHtml(row.key)}" value="${escHtml(current.value ?? '')}" placeholder="${placeholder}"${dis} />`;
+      } else {
+        valueControl = `<input class="form-control form-control-sm cli-opt-value${hidden}" type="text" data-cli-opt-value data-cli-opt-row-key="${escHtml(row.key)}" value="${escHtml(current.value ?? '')}" placeholder="${placeholder}"${dis} />`;
+      }
+    }
+
+    const nameFragment = shortName ? ` <span class="cli-opt-name text-body-secondary"> — ${shortName}</span>` : '';
+    return `
+<div class="cli-opt d-flex align-items-baseline gap-1" data-cli-opt-row data-cli-opt-row-key="${escHtml(row.key)}">
+  <input class="form-check-input cli-opt-check flex-shrink-0" type="${inputType}"${mutex} id="${rowId}" data-cli-opt-toggle data-cli-opt-row-key="${escHtml(row.key)}" data-cli-opt-takes-value="${takesValue ? '1' : '0'}" data-cli-opt-mutex="${escHtml(row.mutexGroup || '')}"${checked}${dis} title="${tooltipText}" aria-label="${escHtml(token)} — ${tooltipText}" />
+  <label class="cli-opt-label mb-0 small flex-grow-1" for="${rowId}" title="${tooltipText}">
+    <code class="cli-opt-flag">${escHtml(token)}</code>${nameFragment}${req}
+  </label>
+  ${valueControl}
+</div>`;
+  };
+
+  CliScanApp._positionalRowHtml = function (row, state, readOnly) {
+    const flag = row.flag;
+    const rowId = `${state.instanceId}-f-${row.key.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const current = state.values[row.key] || { enabled: true, value: '' };
+    const dis = readOnly ? ' disabled' : '';
+    const placeholder = escHtml(row.placeholder || flag.placeholder || 'target');
+    const req = flag.required ? ' <span class="text-danger" aria-hidden="true">*</span>' : '';
+    return `
+<div class="cli-opt cli-opt-positional d-flex align-items-baseline gap-2 mb-1" data-cli-opt-row data-cli-opt-row-key="${escHtml(row.key)}" data-cli-opt-positional="1">
+  <label class="cli-opt-label mb-0 small" for="${rowId}" title="${escHtml(flag.description || '')}">
+    <code class="cli-opt-flag">&lt;${escHtml(flag.id)}&gt;</code>${req}
+  </label>
+  <input class="form-control form-control-sm flex-grow-1" type="text" id="${rowId}" data-cli-opt-value data-cli-opt-row-key="${escHtml(row.key)}" value="${escHtml(current.value ?? '')}" placeholder="${placeholder}"${dis} />
+</div>`;
+  };
+
+  CliScanApp._wireOptionRows = function (container, state) {
+    const root = container.querySelector('[data-cli-scan-options-palette]');
+    if (!root) return;
+
+    root.querySelectorAll('[data-cli-opt-toggle]').forEach((toggle) => {
+      toggle.addEventListener('change', () => {
+        const rowKey = toggle.dataset.cliOptRowKey;
+        const takesValue = toggle.dataset.cliOptTakesValue === '1';
+        const mutex = toggle.dataset.cliOptMutex;
+        const enabled = toggle.checked;
+        if (!state.values[rowKey]) state.values[rowKey] = { enabled: false, value: '' };
+        state.values[rowKey].enabled = enabled;
+
+        if (mutex && enabled) {
+          const mutexSel = typeof CSS?.escape === 'function' ? CSS.escape(mutex) : mutex;
+          root
+            .querySelectorAll(`[data-cli-opt-toggle][data-cli-opt-mutex="${mutexSel}"]`)
+            .forEach((sib) => {
+              if (sib === toggle) return;
+              const sibKey = sib.dataset.cliOptRowKey;
+              if (state.values[sibKey]) state.values[sibKey].enabled = false;
+              sib.checked = false;
+              const sibRow = sib.closest('[data-cli-opt-row]');
+              sibRow?.querySelector('[data-cli-opt-value]')?.classList.add('d-none');
+            });
+        }
+
+        if (takesValue) {
+          const rowEl = toggle.closest('[data-cli-opt-row]');
+          const input = rowEl?.querySelector('[data-cli-opt-value]');
+          if (input) {
+            input.classList.toggle('d-none', !enabled);
+            if (enabled) input.focus();
+          }
+        }
         CliScanApp._updateCommandPreview(container, state);
       });
     });
-  };
 
-  CliScanApp._fieldHtml = function (flag, state, readOnly) {
-    const id = `${state.instanceId}-f-${flag.id}`;
-    const req = flag.required ? ' <span class="text-danger" aria-hidden="true">*</span>' : '';
-    const val = state.values[flag.id];
-    const dis = readOnly ? ' disabled' : '';
-    let input = '';
-    if (flag.type === 'boolean') {
-      input = `<div class="form-check"><input class="form-check-input" type="checkbox" id="${id}" data-cli-scan-field="${flag.id}"${val ? ' checked' : ''}${dis} /><label class="form-check-label" for="${id}">${escHtml(flag.label)}${req}</label></div>`;
-      return `<div class="mb-2">${input}<div class="form-text">${escHtml(flag.description || '')}</div></div>`;
-    }
-    if (flag.type === 'select' && Array.isArray(flag.choices)) {
-      const opts = flag.choices.map((c) => `<option value="${escHtml(c)}"${val === c ? ' selected' : ''}>${escHtml(c)}</option>`).join('');
-      input = `<select class="form-select form-select-sm" id="${id}" data-cli-scan-field="${flag.id}"${dis}>${opts}</select>`;
-    } else if (flag.type === 'integer' || flag.type === 'float') {
-      input = `<input class="form-control form-control-sm" type="number" id="${id}" data-cli-scan-field="${flag.id}" value="${escHtml(val ?? '')}" placeholder="${escHtml(flag.placeholder || '')}"${dis} />`;
-    } else {
-      const hint = flag.type === 'path' ? ' <span class="text-body-secondary">(path)</span>' : '';
-      input = `<input class="form-control form-control-sm" type="text" id="${id}" data-cli-scan-field="${flag.id}" value="${escHtml(val ?? '')}" placeholder="${escHtml(flag.placeholder || '')}"${dis} />${hint}`;
-    }
-    return `<div class="mb-2"><label class="form-label small mb-0" for="${id}">${escHtml(flag.label)}${req}</label>${input}<div class="form-text">${escHtml(flag.description || '')}</div></div>`;
+    root.querySelectorAll('[data-cli-opt-value]').forEach((input) => {
+      const handler = () => {
+        const rowKey = input.dataset.cliOptRowKey;
+        if (!state.values[rowKey]) state.values[rowKey] = { enabled: false, value: '' };
+        state.values[rowKey].value = input.value;
+        const rowEl = input.closest('[data-cli-opt-row]');
+        if (rowEl?.dataset.cliOptPositional === '1') {
+          state.values[rowKey].enabled = input.value.trim().length > 0;
+        }
+        CliScanApp._updateCommandPreview(container, state);
+      };
+      input.addEventListener('input', handler);
+      input.addEventListener('change', handler);
+    });
   };
 
   CliScanApp._updateCommandPreview = function (container, state) {
@@ -319,15 +647,25 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     const exe = state.manifest?.executable || state.toolId;
     const tokens = [exe];
-    (state.schema?.flags || []).forEach((f) => {
-      const v = state.values[f.id];
-      if (f.type === 'boolean') {
-        if (v && f.flag) tokens.push(f.flag);
+    (state.rows || []).forEach((row) => {
+      const v = state.values[row.key];
+      if (!v) return;
+      if (row.isPositional) {
+        if (v.value) tokens.push(String(v.value));
         return;
       }
-      if (v === '' || v == null) return;
-      if (f.flag) tokens.push(f.flag, String(v));
-      else if (f.id === 'target') tokens.push(String(v));
+      if (!v.enabled) return;
+      const tok = row.displayToken;
+      if (row.valueMode === 'none') {
+        tokens.push(tok);
+        return;
+      }
+      if (row.valueMode === 'attached' && v.value !== '' && v.value != null) {
+        tokens.push(`${tok}${v.value}`);
+        return;
+      }
+      tokens.push(tok);
+      if (v.value !== '' && v.value != null) tokens.push(String(v.value));
     });
     pre.textContent = tokens.join(' ');
   };
@@ -466,12 +804,16 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     const svgEl = container.querySelector('[data-cli-scan-graph-svg]');
     const stats = container.querySelector('[data-cli-scan-graph-stats]');
-    if (!svgEl || !window.Viz?.ForceGraph) return;
+    if (!svgEl || !window.Viz?.CanvasGraph) return;
 
     const displayProposal = CliScanApp.applyShadowOptions(proposal, state.shadowDescriptors);
     const { nodes, links } = CliScanApp.transformProposalGraph(displayProposal);
     if (!nodes.length) {
-      window.Viz.Core?.clear(window.Viz.Core.selectSvg(svgEl));
+      const ctx = svgEl.getContext?.('2d');
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, svgEl.width || 0, svgEl.height || 0);
+      }
       if (stats) stats.textContent = 'No proposed graph';
       CliScanApp.renderLegend(container, state);
       return;
@@ -488,15 +830,15 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       }
       if (generation !== state.graphRenderGeneration) return;
       try {
-        state.graphInstance = window.Viz.ForceGraph.create({
-          svg: svgSelector,
+        state.graphInstance = window.Viz.CanvasGraph.create({
+          canvas: svgSelector,
           tooltip: tooltipSelector,
           nodes,
           links,
           variant: 'default',
           nodeDisplay: 'icons',
           linkLabels: true,
-          linkDistance: (l) => (l.role === 'had' ? 40 : 80),
+          linkDistance: 80,
         });
         if (stats) stats.textContent = `${nodes.length} nodes · ${links.length} links`;
         CliScanApp.renderLegend(container, state);

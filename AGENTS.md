@@ -17,6 +17,7 @@ This repository uses **VibeGov** governance. Read this file first, then follow l
 | Bootstrap status | `.governance/project/bootstrap/STATUS.md` |
 | Setup blockers | `INIT-TODO.md` |
 | **SPEC-008 CLI/API Scan UI — CliScanApp component + Composer (active):** | backend spec `@spiderfeet/.governance/specs/SPEC-008-cli-app-scan-ui-content-platform.md` · this repo's plan `.governance/project/SPEC008_AGENT_PLAN.md` (autonomous execute→PR→merge loop; gate on AA2) · issue index `.governance/project/SPEC008_WIDGET_ISSUE_INDEX.md` · backend issue index `@spiderfeet/.governance/project/SPEC008_ISSUE_INDEX.md` |
+| **SPEC-009 CanvasGraph + Web Worker offload (active, widget-only, no backend issues):** | spec `@spiderfeet/.governance/specs/SPEC-009-canvas-graph-component.md` · this repo's plan `.governance/project/SPEC009_AGENT_PLAN.md` (fully autonomous; one structural gate at AG1 — needs AE2 + AF2 completeness labels) · issue index `.governance/project/SPEC009_ISSUE_INDEX.md` (Epics AB–AG, issues #104–#123) · replaces `Viz.ForceGraph` (SVG) with `Viz.CanvasGraph` (canvas + Web Worker) to fix the large-graph page-freeze |
 
 ## Delivery loop
 
@@ -52,6 +53,7 @@ Full detail: `.governance/project/GIT_WORKFLOW.md`
 ## Data Viewer embed
 
 - **Read:** `.docs/data-viewer-embed.md` and skill `.cursor/skills/data-viewer-embed/SKILL.md`
+- **CliScanApp (reusable 5-tab Scan UI):** `.docs/cli-scan-app.md` — `window.Widgets.CliScanApp.create({ container, toolId, mode, detail, … })`
 - Modules: `src/js/data-viewer.js`, `src/js/data-viewer-host.js`, `src/js/theme.js`
 - Upstream: [Embed_prompt.md](https://github.com/brettforbes/json-yaml-xml-csv-widget/blob/main/Embed_prompt.md)
 
