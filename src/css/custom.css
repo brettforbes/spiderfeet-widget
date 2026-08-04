@@ -357,6 +357,163 @@ body {
   border: 0;
 }
 
+/* CliScanApp (SPEC-008) tab shell — same "must live in custom.css" rule as
+   above applies; these were only ever added to the dead custom.scss. */
+.cli-scan-app {
+  min-height: 0;
+}
+
+.cli-scan-tab-content > .tab-pane.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cli-scan-form-col {
+  max-height: 100%;
+  overflow: auto;
+}
+
+.cli-scan-command-preview {
+  flex: 1 1 auto;
+  min-height: 4rem;
+  max-height: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+}
+
+.cli-scan-command-palette {
+  gap: 0.35rem;
+}
+
+.cli-scan-command-palette [data-cli-scan-run] {
+  font-weight: 600;
+}
+
+.cli-scan-command-palette [data-cli-scan-run][disabled] {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
+.cli-scan-pane-scroll {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.cli-scan-pane-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* ==== CLI options palette (Scan tab) ==== */
+.cli-opt-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cli-opt-section {
+  break-inside: avoid;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 0.35rem;
+  background: var(--bs-body-bg, #fff);
+}
+
+.cli-opt-section-title {
+  margin: 0 0 0.35rem 0;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--bs-border-color-translucent, rgba(0, 0, 0, 0.08));
+  font-size: 0.85rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--bs-emphasis-color, #212529);
+}
+
+.cli-opt-section-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.1rem 1rem;
+}
+
+.cli-opt-section-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cli-opt-section-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 991.98px) {
+  .cli-opt-section-cols-2,
+  .cli-opt-section-cols-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cli-opt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.cli-opt {
+  padding: 0.1rem 0.2rem;
+  border-radius: 0.25rem;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.cli-opt:hover {
+  background: var(--bs-secondary-bg, rgba(0, 0, 0, 0.04));
+}
+
+.cli-opt-check {
+  margin-top: 0.15rem;
+}
+
+.cli-opt-label {
+  cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+}
+
+.cli-opt-flag {
+  font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.82rem;
+  color: var(--bs-code-color, #d63384);
+  background: transparent;
+  padding: 0;
+}
+
+.cli-opt-name {
+  font-size: 0.78rem;
+}
+
+.cli-opt-value {
+  max-width: 12rem;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.35rem;
+  height: auto;
+}
+
+.cli-opt-positional .cli-opt-flag {
+  color: var(--bs-emphasis-color, #212529);
+  font-weight: 600;
+}
+
+.cli-opt-section-positional {
+  background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
 /* Graph stage — fill all available height */
 .profiling-graph-stage {
   flex: 1 1 auto;
@@ -376,13 +533,15 @@ body {
   height: 100%;
 }
 
-#profiling-graph-legend {
+#profiling-graph-legend,
+[data-cli-scan-graph-legend] {
   z-index: 3;
   opacity: 0.95;
   max-width: 14rem;
 }
 
-#profiling-graph-legend.profiling-graph-legend-hidden {
+#profiling-graph-legend.profiling-graph-legend-hidden,
+[data-cli-scan-graph-legend].profiling-graph-legend-hidden {
   display: none;
 }
 
@@ -396,7 +555,9 @@ body {
   border-top-style: dashed;
 }
 
-#profiling-view-detail.profiling-graph-host-fullscreen {
+/* CliScanApp graph fullscreen — toggled on the mount `container` passed to
+   CliScanApp.create (any host: Profiling, Composer, etc.). */
+.profiling-graph-host-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 1055;
@@ -405,27 +566,25 @@ body {
   margin: 0 !important;
 }
 
-#profiling-view-detail.profiling-graph-host-fullscreen [data-viewer-chrome~='graph'] {
+.profiling-graph-host-fullscreen .cli-scan-tabs {
   display: none !important;
 }
 
-#profiling-view-detail.profiling-graph-host-fullscreen .profiling-exam-tab-content .tab-pane {
+.profiling-graph-host-fullscreen .cli-scan-tab-content {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* Profiling host chrome when CliScanApp graph is fullscreen */
+#profiling-view-detail:has(.profiling-graph-host-fullscreen) [data-viewer-chrome~='graph'] {
   display: none !important;
 }
 
-#profiling-view-detail.profiling-graph-host-fullscreen #profiling-pane-graph {
-  display: flex !important;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  opacity: 1;
-}
-
-#pane-profiling:has(#profiling-view-detail.profiling-graph-host-fullscreen) #profiling-main-scroll {
+#pane-profiling:has(.profiling-graph-host-fullscreen) #profiling-main-scroll {
   padding: 0 !important;
 }
 
-#pane-profiling:has(#profiling-view-detail.profiling-graph-host-fullscreen) > div > footer {
+#pane-profiling:has(.profiling-graph-host-fullscreen) > div > footer {
   display: none !important;
 }
 

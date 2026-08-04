@@ -1,4 +1,10 @@
 
+// NOTE: this file is NOT part of the webpack build (the sass-loader/
+// MiniCssExtractPlugin pipeline below is commented out in webpack.common.js).
+// The stylesheet actually served to the widget is src/css/custom.css — any
+// new rule added here must also be added there, or it silently has no effect.
+// (See the "CLI Profiling" comment block in custom.css for prior art.)
+
 // Import Bootstrap's variables and mixins
 @import 'bootstrap/scss/functions';
 @import 'bootstrap/scss/variables';
@@ -343,13 +349,30 @@ body {
 
 .cli-scan-form-col {
   max-height: 100%;
+  overflow: auto;
 }
 
 .cli-scan-command-preview {
-  max-height: 12rem;
+  flex: 1 1 auto;
+  min-height: 4rem;
+  max-height: 100%;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  font-size: 0.78rem;
+}
+
+.cli-scan-command-palette {
+  gap: 0.35rem;
+
+  [data-cli-scan-run] {
+    font-weight: 600;
+  }
+
+  [data-cli-scan-run][disabled] {
+    opacity: 0.85;
+    cursor: not-allowed;
+  }
 }
 
 .cli-scan-pane-scroll {
@@ -362,4 +385,107 @@ body {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+}
+
+// ==== CLI options palette (Scan tab) ====
+.cli-opt-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cli-opt-section {
+  break-inside: avoid;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 0.35rem;
+  background: var(--bs-body-bg, #fff);
+}
+
+.cli-opt-section-title {
+  margin: 0 0 0.35rem 0;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--bs-border-color-translucent, rgba(0, 0, 0, 0.08));
+  font-size: 0.85rem;
+  color: var(--bs-emphasis-color, #212529);
+}
+
+.cli-opt-section-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.1rem 1rem;
+
+  &.cli-opt-section-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  &.cli-opt-section-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 991.98px) {
+  .cli-opt-section-cols-2,
+  .cli-opt-section-cols-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cli-opt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.cli-opt {
+  padding: 0.1rem 0.2rem;
+  border-radius: 0.25rem;
+  line-height: 1.2;
+  min-width: 0;
+
+  &:hover {
+    background: var(--bs-secondary-bg, rgba(0, 0, 0, 0.04));
+  }
+}
+
+.cli-opt-check {
+  margin-top: 0.15rem;
+}
+
+.cli-opt-label {
+  cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+}
+
+.cli-opt-flag {
+  font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.82rem;
+  color: var(--bs-code-color, #d63384);
+  background: transparent;
+  padding: 0;
+}
+
+.cli-opt-name {
+  font-size: 0.78rem;
+}
+
+.cli-opt-value {
+  max-width: 12rem;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.35rem;
+  height: auto;
+}
+
+.cli-opt-positional .cli-opt-flag {
+  color: var(--bs-emphasis-color, #212529);
+  font-weight: 600;
+}
+
+.cli-opt-section-positional {
+  background: var(--bs-tertiary-bg, #f8f9fa);
 }

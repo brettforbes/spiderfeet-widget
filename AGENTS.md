@@ -53,6 +53,7 @@ Full detail: `.governance/project/GIT_WORKFLOW.md`
 ## Data Viewer embed
 
 - **Read:** `.docs/data-viewer-embed.md` and skill `.cursor/skills/data-viewer-embed/SKILL.md`
+- **CliScanApp (reusable 5-tab Scan UI):** `.docs/cli-scan-app.md` — `window.Widgets.CliScanApp.create({ container, toolId, mode, detail, … })`
 - Modules: `src/js/data-viewer.js`, `src/js/data-viewer-host.js`, `src/js/theme.js`
 - Upstream: [Embed_prompt.md](https://github.com/brettforbes/json-yaml-xml-csv-widget/blob/main/Embed_prompt.md)
 
