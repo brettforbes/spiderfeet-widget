@@ -43,6 +43,7 @@ window.Widgets.DataViewerHost = window.Widgets.DataViewerHost || {};
       prior._register();
       return prior.api;
     }
+    if (prior) Host.destroy(instanceId);
 
     const binding = {
       instanceId,
@@ -91,11 +92,13 @@ window.Widgets.DataViewerHost = window.Widgets.DataViewerHost || {};
       clear: () => DataViewer.clear(instanceId),
       reset: () => DataViewer.reset(instanceId),
       reloadWhenVisible: () => binding._reloadWhenVisible(),
+      destroy: () => Host.destroy(instanceId),
     };
 
     if (config.tabButton) {
       const tab = Host._resolveElement(config.tabButton);
       if (tab) {
+        binding._tab = tab;
         binding._tabListener = () => binding._reloadWhenVisible();
         tab.addEventListener('shown.bs.tab', binding._tabListener);
       }
@@ -137,6 +140,26 @@ window.Widgets.DataViewerHost = window.Widgets.DataViewerHost || {};
 
   Host.get = function (instanceId) {
     return Host._bindings.get(instanceId)?.api || null;
+  };
+
+  /**
+   * Tear down a binding created by Host.create: removes the window-level
+   * 'data-viewer:ready' / 'data-viewer:fullscreen-changed' listeners and the
+   * tab's 'shown.bs.tab' listener, then unmounts the underlying DataViewer
+   * instance. Without this, callers that rebuild their DOM (innerHTML = '')
+   * and re-call Host.create with a fresh iframe element (same instanceId)
+   * leak a full set of window listeners every time — the prior binding's
+   * `iframe !== iframe` check never reuses it, so a brand new binding (and
+   * new listeners) is created on top of the still-attached old ones.
+   */
+  Host.destroy = function (instanceId) {
+    const binding = Host._bindings.get(instanceId);
+    if (!binding) return;
+    if (binding._readyListener) window.removeEventListener('data-viewer:ready', binding._readyListener);
+    if (binding._fullscreenListener) window.removeEventListener('data-viewer:fullscreen-changed', binding._fullscreenListener);
+    if (binding._tab && binding._tabListener) binding._tab.removeEventListener('shown.bs.tab', binding._tabListener);
+    Host._bindings.delete(instanceId);
+    DataViewer.unmount(instanceId);
   };
 
   Host.inferFormat = function (payload) {
