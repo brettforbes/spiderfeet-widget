@@ -344,12 +344,23 @@
                 </button>
               </div>
               <div
-                class="composer-viewer-stage flex-grow-1 position-relative bg-body-secondary overflow-hidden"
+                class="composer-viewer-stage flex-grow-1 position-relative bg-body overflow-hidden"
                 id="composer-project-context-stage"
+                data-composer-graph-stage="project-context"
               >
-                <div class="composer-viewer-placeholder text-body-secondary small">
-                  Empty project context — CanvasGraph mounts in AR3
-                </div>
+                <canvas
+                  id="composer-project-context-canvas"
+                  class="composer-graph-canvas viz-layer w-100 h-100"
+                  role="img"
+                  aria-label="Project context graph (empty)"
+                  data-composer-graph-canvas="project-context"
+                ></canvas>
+                <div
+                  id="composer-project-context-tooltip"
+                  class="composer-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                  hidden
+                  data-composer-graph-tooltip="project-context"
+                ></div>
               </div>
             </section>
 
@@ -373,12 +384,23 @@
                 </button>
               </div>
               <div
-                class="composer-viewer-stage flex-grow-1 position-relative bg-body-secondary overflow-hidden"
+                class="composer-viewer-stage flex-grow-1 position-relative bg-body overflow-hidden"
                 id="composer-temp-subgraph-stage"
+                data-composer-graph-stage="temp-subgraph"
               >
-                <div class="composer-viewer-placeholder text-body-secondary small">
-                  Temporary subgraphs accumulate here — CanvasGraph mounts in AR3
-                </div>
+                <canvas
+                  id="composer-temp-subgraph-canvas"
+                  class="composer-graph-canvas viz-layer w-100 h-100"
+                  role="img"
+                  aria-label="Temporary subgraph graph"
+                  data-composer-graph-canvas="temp-subgraph"
+                ></canvas>
+                <div
+                  id="composer-temp-subgraph-tooltip"
+                  class="composer-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                  hidden
+                  data-composer-graph-tooltip="temp-subgraph"
+                ></div>
               </div>
             </section>
           </main>
