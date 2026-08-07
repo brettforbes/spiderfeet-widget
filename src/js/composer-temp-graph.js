@@ -2,24 +2,38 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
 
 /**
- * SPEC-011 AW1 / R11-18 — Temporary Subgraph Viewer import with temporary_id.
+ * SPEC-011 AW1–AW2 / R11-18–R19 — Temporary Subgraph Viewer.
  *
- * On a completed step with `context.export: scan_graph`, each imported node
- * receives a fresh `temporary--<uuidv4>`; edges are remapped to those ids and
- * the result is appended as a discrete subgraph (overlapping canonical ids
- * do not collide). AW2 adds remove toggles; AW3 strips temporary_id on send.
+ * AW1: on completed step with `context.export: scan_graph`, assign each node a
+ * fresh `temporary--<uuidv4>`, remap edges, append as a discrete subgraph.
+ * AW2: render accumulated imports as discrete CanvasGraph clusters and provide
+ * a per-subgraph remove toggle. AW3 strips temporary_id on send.
  */
 (function (ComposerTempGraph, Widgets, document, window) {
   'use strict';
+
+  /** Accent colours so each imported subgraph reads as a discrete cluster. */
+  ComposerTempGraph.SUBGRAPH_PALETTE = [
+    '#0d6efd',
+    '#198754',
+    '#fd7e14',
+    '#6f42c1',
+    '#dc3545',
+    '#20c997',
+    '#0dcaf0',
+    '#6610f2',
+  ];
 
   /** @type {Array<{
    *   subgraphId: string,
    *   stepId: string|null,
    *   importedAt: string,
+   *   label: string,
    *   nodes: object[],
    *   edges: object[]
    * }>} */
   ComposerTempGraph._subgraphs = [];
+  ComposerTempGraph._uiBound = false;
 
   /**
    * Shared uuidv4 helper (browser crypto.randomUUID when available).
@@ -137,9 +151,10 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
    * Node `id` becomes the temporary_id so CanvasGraph endpoints stay discrete;
    * original identity is preserved on `nugget_instance_id`.
    * @param {{ nodes?: object[], edges?: object[], links?: object[] }} scanGraph
+   * @param {string} [subgraphId]
    * @returns {{ nodes: object[], edges: object[], idMap: Record<string, string> }}
    */
-  ComposerTempGraph.assignTemporaryIds = function (scanGraph) {
+  ComposerTempGraph.assignTemporaryIds = function (scanGraph, subgraphId) {
     const idMap = Object.create(null);
     const nodes = [];
     const rawNodes = Array.isArray(scanGraph?.nodes) ? scanGraph.nodes : [];
@@ -158,6 +173,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
       }
       node.temporary_id = temporaryId;
       node.id = temporaryId;
+      if (subgraphId) node.subgraph_id = subgraphId;
       nodes.push(node);
     });
 
@@ -184,6 +200,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
       if ('target' in edge || nextTgt != null) edge.target = nextTgt;
       if ('from' in edge) edge.from = nextSrc;
       if ('to' in edge) edge.to = nextTgt;
+      if (subgraphId) edge.subgraph_id = subgraphId;
       return edge;
     });
 
@@ -191,7 +208,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
-   * Flatten accumulated discrete subgraphs for CanvasGraph.
+   * Flatten accumulated discrete subgraphs for CanvasGraph / AW3 send.
    * @returns {{ nodes: object[], edges: object[], links: object[] }}
    */
   ComposerTempGraph.getAccumulatedGraph = function () {
@@ -209,48 +226,148 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     return ComposerTempGraph._subgraphs.slice();
   };
 
-  ComposerTempGraph.clear = function () {
-    ComposerTempGraph._subgraphs = [];
-  };
-
   /**
    * Convert accumulated temporary graph into CanvasGraph `{nodes,links}`.
-   * Prefer CliScanApp.transformProposalGraph when available.
+   * Each import is a discrete group with a seeded cluster offset (R11-19).
    * @returns {{ nodes: object[], links: object[] }}
    */
   ComposerTempGraph.toCanvasGraph = function () {
-    const proposal = ComposerTempGraph.getAccumulatedGraph();
-    if (Widgets.CliScanApp?.transformProposalGraph) {
-      return Widgets.CliScanApp.transformProposalGraph(proposal);
-    }
-    const nodes = (proposal.nodes || []).map((n) => ({
-      id: n.temporary_id || n.id,
-      group: 'nugget',
-      label: n.nugget_id || n.nugget_instance_id || n.id,
-      shortLabel: n.nugget_id || n.nugget_instance_id || n.id,
-      r: 10,
-      iconSize: 28,
-      colour: '#6c757d',
-      meta: {
-        nugget_type: n.nugget_type,
-        nugget_instance_id: n.nugget_instance_id,
-        temporary_id: n.temporary_id,
-        data: n.data || n.nugget_data,
-      },
-    }));
-    const links = (proposal.edges || []).map((e, idx) => ({
-      id: `temp-edge-${idx}`,
-      source: e.source,
-      target: e.target,
-      role: e.relation || e.type || e.name || 'contains',
-    }));
+    const subgraphs = ComposerTempGraph._subgraphs;
+    const nodes = [];
+    const links = [];
+    const colourFor = Widgets.CliScanApp?.colourForNode;
+    const iconBase = Widgets.CliScanApp?.ICON_BASE || '/assets/icons/';
+    const count = Math.max(subgraphs.length, 1);
+
+    subgraphs.forEach((sg, sgIndex) => {
+      const group = `import-${sgIndex + 1}`;
+      const accent =
+        ComposerTempGraph.SUBGRAPH_PALETTE[
+          sgIndex % ComposerTempGraph.SUBGRAPH_PALETTE.length
+        ];
+      const clusterAngle = (2 * Math.PI * sgIndex) / count;
+      const clusterR = 160;
+      const cx = Math.cos(clusterAngle) * clusterR;
+      const cy = Math.sin(clusterAngle) * clusterR;
+      const localNodes = Array.isArray(sg.nodes) ? sg.nodes : [];
+
+      localNodes.forEach((n, i) => {
+        const nuggetId = n.nugget_id || n.nugget_instance_id || n.id;
+        const localAngle = (2 * Math.PI * i) / Math.max(localNodes.length, 1);
+        const localR = 36 + Math.min(localNodes.length, 8) * 2;
+        nodes.push({
+          id: n.temporary_id || n.id,
+          group,
+          label: nuggetId,
+          shortLabel: nuggetId,
+          r: 10,
+          iconSize: 28,
+          colour: colourFor ? colourFor(n) : accent,
+          iconUrl: `${iconBase}icon_${String(nuggetId).toLowerCase()}.svg`,
+          x: cx + localR * Math.cos(localAngle),
+          y: cy + localR * Math.sin(localAngle),
+          meta: {
+            nugget_type: n.nugget_type,
+            nugget_instance_id: n.nugget_instance_id,
+            temporary_id: n.temporary_id,
+            subgraph_id: sg.subgraphId,
+            import_index: sgIndex + 1,
+            data: n.data || n.nugget_data,
+            kind: 'nugget',
+          },
+        });
+      });
+
+      (sg.edges || []).forEach((e, idx) => {
+        links.push({
+          id: `${sg.subgraphId}-edge-${idx}`,
+          source: e.source,
+          target: e.target,
+          role: e.relation || e.type || e.name || 'contains',
+        });
+      });
+    });
+
     return { nodes, links };
   };
 
+  function escHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   /**
-   * Remount the Temporary Subgraph Viewer CanvasGraph with accumulated data.
+   * Render per-subgraph remove toggles (R11-19).
+   */
+  ComposerTempGraph.renderSubgraphToggles = function () {
+    const list = document.getElementById('composer-temp-subgraph-list');
+    if (!list) return;
+
+    const subgraphs = ComposerTempGraph._subgraphs;
+    if (!subgraphs.length) {
+      list.replaceChildren();
+      list.hidden = true;
+      list.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    list.hidden = false;
+    list.setAttribute('aria-hidden', 'false');
+    const parts = subgraphs.map((sg, index) => {
+      const accent =
+        ComposerTempGraph.SUBGRAPH_PALETTE[
+          index % ComposerTempGraph.SUBGRAPH_PALETTE.length
+        ];
+      const label = sg.label || `Import ${index + 1}`;
+      const nodeCount = (sg.nodes || []).length;
+      const title = sg.stepId
+        ? `${label} · ${sg.stepId} (${nodeCount} nodes)`
+        : `${label} (${nodeCount} nodes)`;
+      return (
+        `<div class="composer-temp-subgraph-chip d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-body" ` +
+        `data-temp-subgraph-id="${escHtml(sg.subgraphId)}" style="border-left: 3px solid ${accent} !important;">` +
+        `<span class="small text-truncate" style="max-width: 12rem;" title="${escHtml(title)}">${escHtml(label)}` +
+        (sg.stepId
+          ? ` <span class="text-body-secondary">· ${escHtml(sg.stepId)}</span>`
+          : '') +
+        ` <span class="text-body-secondary">(${nodeCount})</span></span>` +
+        `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" ` +
+        `data-temp-subgraph-remove="${escHtml(sg.subgraphId)}" ` +
+        `title="Remove ${escHtml(label)}" aria-label="Remove ${escHtml(label)}">` +
+        `<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>` +
+        `</div>`
+      );
+    });
+    list.innerHTML = parts.join('');
+  };
+
+  /**
+   * Bind remove-toggle clicks once.
+   */
+  ComposerTempGraph.bindUi = function () {
+    if (ComposerTempGraph._uiBound) return;
+    const list = document.getElementById('composer-temp-subgraph-list');
+    if (!list) return;
+    ComposerTempGraph._uiBound = true;
+    list.addEventListener('click', (event) => {
+      const btn = event.target?.closest?.('[data-temp-subgraph-remove]');
+      if (!btn) return;
+      event.preventDefault();
+      const id = btn.getAttribute('data-temp-subgraph-remove');
+      if (id) ComposerTempGraph.removeSubgraph(id);
+    });
+  };
+
+  /**
+   * Remount the Temporary Subgraph Viewer CanvasGraph with accumulated data
+   * and refresh remove toggles (R11-19).
    */
   ComposerTempGraph.refreshViewer = function () {
+    ComposerTempGraph.bindUi();
+    ComposerTempGraph.renderSubgraphToggles();
     const Composer = Widgets.Composer;
     if (!Composer?.mountCanvasGraph) return;
     const canvas = ComposerTempGraph.toCanvasGraph();
@@ -265,6 +382,27 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
+   * Remove one discrete import; remaining subgraphs stay mounted (R11-19).
+   * @param {string} subgraphId
+   * @returns {boolean}
+   */
+  ComposerTempGraph.removeSubgraph = function (subgraphId) {
+    if (!subgraphId) return false;
+    const before = ComposerTempGraph._subgraphs.length;
+    ComposerTempGraph._subgraphs = ComposerTempGraph._subgraphs.filter(
+      (sg) => sg.subgraphId !== subgraphId
+    );
+    if (ComposerTempGraph._subgraphs.length === before) return false;
+    ComposerTempGraph.refreshViewer();
+    return true;
+  };
+
+  ComposerTempGraph.clear = function () {
+    ComposerTempGraph._subgraphs = [];
+    ComposerTempGraph.refreshViewer();
+  };
+
+  /**
    * Import one scan graph as a discrete subgraph (R11-18).
    * @param {{ nodes?: object[], edges?: object[], links?: object[] }} scanGraph
    * @param {{ stepId?: string|null }} [meta]
@@ -272,15 +410,23 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
    */
   ComposerTempGraph.importScanGraph = function (scanGraph, meta) {
     if (!scanGraph || typeof scanGraph !== 'object') return null;
-    const assigned = ComposerTempGraph.assignTemporaryIds(scanGraph);
+    const subgraphId = `subgraph--${ComposerTempGraph.uuidv4()}`;
+    const assigned = ComposerTempGraph.assignTemporaryIds(scanGraph, subgraphId);
+    const importIndex = ComposerTempGraph._subgraphs.length + 1;
+    const stepId = meta?.stepId != null ? String(meta.stepId) : null;
     const subgraph = {
-      subgraphId: `subgraph--${ComposerTempGraph.uuidv4()}`,
-      stepId: meta?.stepId != null ? String(meta.stepId) : null,
+      subgraphId,
+      stepId,
       importedAt: new Date().toISOString(),
+      label: `Import ${importIndex}`,
       nodes: assigned.nodes,
       edges: assigned.edges,
     };
     ComposerTempGraph._subgraphs.push(subgraph);
+    // Relabel so indices stay contiguous after removals.
+    ComposerTempGraph._subgraphs.forEach((sg, i) => {
+      sg.label = `Import ${i + 1}`;
+    });
     ComposerTempGraph.refreshViewer();
     return subgraph;
   };
@@ -322,5 +468,11 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
 
     const imported = ComposerTempGraph.importScanGraph(graph, { stepId: ownerId });
     return imported ? { subgraphId: imported.subgraphId } : null;
+  };
+
+  /** Ensure toggle strip is bound when Composer mounts. */
+  ComposerTempGraph.initFromComposer = function () {
+    ComposerTempGraph.bindUi();
+    ComposerTempGraph.renderSubgraphToggles();
   };
 })(window.Widgets.ComposerTempGraph, window.Widgets, document, window);

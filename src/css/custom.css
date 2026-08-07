@@ -895,6 +895,16 @@ body {
   min-height: 0;
 }
 
+/* SPEC-011 AW2 / R11-19 — discrete import chips with remove toggles */
+.composer-temp-subgraph-list {
+  max-height: 4.5rem;
+  overflow-y: auto;
+}
+
+.composer-temp-subgraph-chip {
+  max-width: 100%;
+}
+
 .composer-viewer-placeholder {
   position: absolute;
   inset: 0;
