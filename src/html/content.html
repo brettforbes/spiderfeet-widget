@@ -144,11 +144,21 @@
       <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
         <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex align-items-center gap-2">
           <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Projects</h2>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            id="projects-refresh"
+            title="Refresh projects"
+          >
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+            <span class="visually-hidden">Refresh</span>
+          </button>
         </div>
         <div class="flex-grow-1 overflow-auto p-3" id="projects-main">
-          <p class="small text-body-secondary mb-0">
-            Project list will load here.
-          </p>
+          <div class="d-flex align-items-center justify-content-center py-5 text-body-secondary" role="status">
+            <div class="spinner-border spinner-border-sm me-2" aria-hidden="true"></div>
+            <span>Loading projects…</span>
+          </div>
         </div>
         <footer
           class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
