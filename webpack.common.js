@@ -158,6 +158,7 @@ module.exports = {
                 paths.src + '/js/connection.js',
                 paths.src + '/js/spiderfeet-api.js',
                 paths.src + '/js/projects.js',
+                paths.src + '/js/composer.js',
                 paths.src + '/js/shell.js',
                 paths.src + '/js/theme.js',
                 paths.src + '/js/viz.core.js',
