@@ -156,6 +156,7 @@ module.exports = {
                 paths.src + '/js/_namespace.js',
                 paths.src + '/js/#events.js',
                 paths.src + '/js/connection.js',
+                paths.src + '/js/spiderfeet-api.js',
                 paths.src + '/js/shell.js',
                 paths.src + '/js/theme.js',
                 paths.src + '/js/viz.core.js',
