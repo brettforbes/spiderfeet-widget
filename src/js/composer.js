@@ -218,7 +218,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
   /**
    * Mount CliScanApp for a resolved workflow tool step (edit-run).
-   * @param {{ toolId: string, stepId: string, title?: string }} opts
+   * Unset steps (no prior run): Scan tab only, Scan Now disabled, options editable (R11-13 / AT2).
+   * @param {{ toolId: string, stepId: string, title?: string, hasRun?: boolean, runEnabled?: boolean, detail?: object|null }} opts
    */
   Composer.mountCliScanApp = function (opts) {
     const toolId = opts?.toolId;
@@ -234,6 +235,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       return null;
     }
 
+    // Composer has no run store yet (AV1); default unset gating until a host passes hasRun.
+    const hasRun = opts?.hasRun === true;
+    const runEnabled = opts?.runEnabled === true;
+    const detail = opts?.detail ?? null;
+
     // Same tool + already mounted → reload detail only (avoid destroy storm).
     if (
       Composer._cliScanApp &&
@@ -247,7 +253,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           toolId,
           mode: 'edit-run',
           scenarioKey: stepId || null,
-          detail: null,
+          detail,
+          hasRun,
+          runEnabled,
         });
       } catch (err) {
         console.warn('Composer.mountCliScanApp reload failed', err);
@@ -268,7 +276,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         toolId,
         mode: 'edit-run',
         scenarioKey: stepId || null,
-        detail: null,
+        detail,
+        hasRun,
+        runEnabled,
         instanceId: 'composer-cli-scan',
         dataSource: { contentBase: '/content', corpusBase: '/cli-corpus' },
       });
@@ -348,8 +358,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       toolId: info.toolId,
       stepId: classified.stepId,
       title,
+      hasRun: false,
+      runEnabled: false,
     });
-    Composer.setStatus(`Opened ${info.toolId} for step ${classified.stepId}.`);
+    Composer.setStatus(
+      `Opened ${info.toolId} for step ${classified.stepId} (unset — Scan tab only, Scan Now disabled).`
+    );
   };
 
   /** Open right slide-in without clearing mount state. */

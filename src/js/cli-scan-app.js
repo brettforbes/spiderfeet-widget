@@ -11,13 +11,16 @@
  *     mode: 'view' | 'edit-run',   // view = read-only examination; edit-run = live form
  *     scenarioKey: 'capstone_…',   // optional label
  *     detail: scenarioDetail,      // optional examination payload (text/structured/graph/md)
+ *     hasRun: false,               // R11-13: false locks Text/Structured/Graph/Report
+ *     runEnabled: false,           // R11-13/AU2: false keeps Scan Now disabled in edit-run
  *     instanceId: 'my-scan',       // optional; unique per concurrent mount
  *     dataSource: {
  *       contentBase: '/content',   // options-schema + markdown docs
  *       corpusBase: '/cli-corpus', // unused by component today; reserved for hosts
  *     },
  *   });
- *   // later: app.reload({ toolId, detail, mode }); app.destroy();
+ *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled });
+ *   //        app.setHasRun(true); app.setRunEnabled(true); app.destroy();
  *
  * Host pages own chrome around the mount. Graph fullscreen toggles
  * `.profiling-graph-host-fullscreen` on `container` so any host can style it.
@@ -69,6 +72,41 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       .replace(/"/g, '&quot;');
   }
 
+
+  /** True when examination/run detail carries any of the four output forms. */
+  CliScanApp._detailHasRun = function (detail) {
+    if (!detail || typeof detail !== 'object') return false;
+    if (detail.output_text) return true;
+    if (detail.narrative_markdown) return true;
+    if (detail.graph_proposal && (detail.graph_proposal.nodes?.length || detail.graph_proposal.links?.length)) {
+      return true;
+    }
+    const structured = detail.structured;
+    if (structured == null) return false;
+    if (typeof structured === 'string') return structured.length > 0;
+    if (typeof structured === 'object') {
+      if (structured.content != null && structured.content !== '') return true;
+      if (Object.keys(structured).length > 0) return true;
+    }
+    return false;
+  };
+
+  CliScanApp._resolveHasRun = function (config, detail) {
+    if (config && Object.prototype.hasOwnProperty.call(config, 'hasRun')) {
+      return Boolean(config.hasRun);
+    }
+    return CliScanApp._detailHasRun(detail);
+  };
+
+  CliScanApp._resolveRunEnabled = function (config, mode, hasRun) {
+    if (config && Object.prototype.hasOwnProperty.call(config, 'runEnabled')) {
+      return Boolean(config.runEnabled);
+    }
+    // Unset edit-run steps keep Scan Now off until a host (AU2) enables it.
+    if (mode === 'edit-run' && !hasRun) return false;
+    return mode === 'edit-run';
+  };
+
   CliScanApp.create = function (config) {
     const container = config.container;
     if (!container) throw new Error('CliScanApp.create requires container');
@@ -78,12 +116,18 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const contentBase = config.dataSource?.contentBase || '/content';
     const corpusBase = config.dataSource?.corpusBase || '/cli-corpus';
 
+    const detail = config.detail || null;
+    const hasRun = CliScanApp._resolveHasRun(config, detail);
+    const runEnabled = CliScanApp._resolveRunEnabled(config, mode, hasRun);
+
     const state = {
       instanceId,
       mode,
       toolId: config.toolId || '',
       scenarioKey: config.scenarioKey || null,
-      detail: config.detail || null,
+      detail,
+      hasRun,
+      runEnabled,
       contentBase,
       corpusBase,
       schema: null,
@@ -105,6 +149,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     CliScanApp._instances.set(instanceId, state);
     CliScanApp._wireTabs(container, state);
     CliScanApp._wireRail(container, state);
+    CliScanApp._syncOutputTabs(container, state);
     CliScanApp.load(state, config).catch((err) => {
       console.error('CliScanApp.load failed', err);
       CliScanApp._setStatus(container, state, err.message);
@@ -112,6 +157,8 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     return {
       instanceId,
       reload: (next) => CliScanApp.load(state, next),
+      setHasRun: (next) => CliScanApp.setHasRun(state, next),
+      setRunEnabled: (next) => CliScanApp.setRunEnabled(state, next),
       destroy: () => CliScanApp.destroy(state),
     };
   };
@@ -129,7 +176,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       window.removeEventListener('shell:theme-changed', state._themeChangedListener);
       state._themeChangedListener = null;
     }
-    (state._tabListeners || []).forEach(({ tab, fn }) => tab.removeEventListener('shown.bs.tab', fn));
+    (state._tabListeners || []).forEach(({ tab, fn, type }) => {
+      tab.removeEventListener(type || 'shown.bs.tab', fn);
+    });
     state._tabListeners = [];
     state._destroyed = true;
     CliScanApp._instances.delete(state.instanceId);
@@ -139,9 +188,11 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const container = state.container || document.querySelector(`[data-cli-scan-id="${state.instanceId}"]`);
     state.container = container;
     if (config.toolId) state.toolId = config.toolId;
-    if (config.scenarioKey) state.scenarioKey = config.scenarioKey;
-    if (config.detail) state.detail = config.detail;
+    if (config.scenarioKey !== undefined) state.scenarioKey = config.scenarioKey;
+    if (Object.prototype.hasOwnProperty.call(config, 'detail')) state.detail = config.detail || null;
     if (config.mode) state.mode = config.mode === 'edit-run' ? 'edit-run' : 'view';
+    state.hasRun = CliScanApp._resolveHasRun(config, state.detail);
+    state.runEnabled = CliScanApp._resolveRunEnabled(config, state.mode, state.hasRun);
 
     CliScanApp._setStatus(container, state, `Loading ${state.toolId}…`);
 
@@ -170,15 +221,105 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     state.values = initial.values;
     state.rows = initial.rows;
 
+    CliScanApp._syncOutputTabs(container, state);
     CliScanApp._syncRunButton(container, state);
     CliScanApp._renderScanForm(container, state);
     CliScanApp._updateCommandPreview(container, state);
 
-    if (state.detail) {
+    if (state.detail && state.hasRun) {
       CliScanApp._renderOutputs(container, state);
     }
 
-    CliScanApp._setStatus(container, state, `Ready — ${state.toolId}${state.scenarioKey ? ` / ${state.scenarioKey}` : ''}`);
+    const unsetHint =
+      state.mode === 'edit-run' && !state.hasRun
+        ? ' — unset step: options editable; output tabs locked; Scan Now disabled'
+        : '';
+    CliScanApp._setStatus(
+      container,
+      state,
+      `Ready — ${state.toolId}${state.scenarioKey ? ` / ${state.scenarioKey}` : ''}${unsetHint}`
+    );
+  };
+
+  /** R11-13 — unlock/lock Text|Structured|Graph|Report after a run exists. */
+  CliScanApp.setHasRun = function (state, hasRun) {
+    state.hasRun = Boolean(hasRun);
+    const container = state.container;
+    if (!container) return;
+    CliScanApp._syncOutputTabs(container, state);
+    if (!state.hasRun && state.mode === 'edit-run' && !state._runEnabledPinned) {
+      state.runEnabled = false;
+      CliScanApp._syncRunButton(container, state);
+    }
+  };
+
+  /** AU2 will call this when step options validate; AT2 keeps it false for unset steps. */
+  CliScanApp.setRunEnabled = function (state, runEnabled) {
+    state.runEnabled = Boolean(runEnabled);
+    state._runEnabledPinned = true;
+    const container = state.container;
+    if (!container) return;
+    CliScanApp._syncRunButton(container, state);
+  };
+
+  /**
+   * Lock non-Scan tabs until a run exists (R11-13).
+   * Scan tab stays active; option controls remain enabled separately via mode.
+   */
+  CliScanApp._syncOutputTabs = function (container, state) {
+    if (!container) return;
+    const tabs = container.querySelectorAll('.cli-scan-tabs [data-bs-toggle="tab"], .cli-scan-tabs .nav-link');
+    const locked = !state.hasRun;
+    let scanTab = null;
+    tabs.forEach((tab) => {
+      const target = tab.getAttribute('data-bs-target') || '';
+      const isScan = target.endsWith('-pane-scan');
+      if (isScan) {
+        scanTab = tab;
+        tab.classList.remove('disabled');
+        tab.removeAttribute('aria-disabled');
+        tab.removeAttribute('tabindex');
+        tab.title = '';
+        return;
+      }
+      if (locked) {
+        tab.classList.add('disabled');
+        tab.setAttribute('aria-disabled', 'true');
+        tab.setAttribute('tabindex', '-1');
+        tab.title = 'Locked until this step has a run';
+      } else {
+        tab.classList.remove('disabled');
+        tab.removeAttribute('aria-disabled');
+        tab.removeAttribute('tabindex');
+        tab.title = '';
+      }
+    });
+    container.classList.toggle('cli-scan-outputs-locked', locked);
+
+    if (locked && scanTab) {
+      const activeNonScan = container.querySelector(
+        '.cli-scan-tabs .nav-link.active:not([data-bs-target$="-pane-scan"])'
+      );
+      if (activeNonScan || !scanTab.classList.contains('active')) {
+        try {
+          if (window.bootstrap?.Tab) {
+            window.bootstrap.Tab.getOrCreateInstance(scanTab).show();
+          } else {
+            container.querySelectorAll('.cli-scan-tabs .nav-link').forEach((t) => {
+              t.classList.toggle('active', t === scanTab);
+              t.setAttribute('aria-selected', t === scanTab ? 'true' : 'false');
+            });
+            container.querySelectorAll('.cli-scan-tab-content > .tab-pane').forEach((pane) => {
+              const show = pane.id === `${state.instanceId}-pane-scan`;
+              pane.classList.toggle('show', show);
+              pane.classList.toggle('active', show);
+            });
+          }
+        } catch (err) {
+          console.warn('CliScanApp._syncOutputTabs: could not activate Scan tab', err);
+        }
+      }
+    }
   };
 
   CliScanApp._shellHtml = function (state) {
@@ -254,13 +395,27 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     });
     state._tabListeners = [];
     container.querySelectorAll('.cli-scan-tabs [data-bs-toggle="tab"]').forEach((tab) => {
-      const fn = () => {
+      const showFn = () => {
         if (tab.id === `${state.instanceId}-tab-graph` && state.detail?.graph_proposal) {
           setTimeout(() => CliScanApp.renderProposalGraph(container, state, state.detail.graph_proposal), 50);
         }
       };
-      tab.addEventListener('shown.bs.tab', fn);
-      state._tabListeners.push({ tab, fn });
+      const guardFn = (event) => {
+        const target = tab.getAttribute('data-bs-target') || '';
+        const isScan = target.endsWith('-pane-scan');
+        if (!state.hasRun && !isScan) {
+          event.preventDefault();
+          event.stopPropagation();
+          CliScanApp._setStatus(
+            container,
+            state,
+            'Output tabs are locked until this step has a run.'
+          );
+        }
+      };
+      tab.addEventListener('show.bs.tab', guardFn);
+      tab.addEventListener('shown.bs.tab', showFn);
+      state._tabListeners.push({ tab, fn: showFn }, { tab, fn: guardFn, type: 'show.bs.tab' });
     });
     // Stored on state (not an inline arrow) so CliScanApp.destroy can remove it —
     // otherwise every reopened scenario leaks another window listener, and
@@ -306,9 +461,17 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     runBtn.classList.remove('active');
     runBtn.removeAttribute('aria-pressed');
+    runBtn.textContent = 'Scan Now';
+    // R11-13 / AT2: unset steps keep Scan Now disabled; AU2 enables via runEnabled.
+    if (!state.runEnabled) {
+      runBtn.disabled = true;
+      runBtn.title = state.hasRun
+        ? 'Scan Now is disabled for this step.'
+        : 'Scan Now disabled until step options are valid (unset step).';
+      return;
+    }
     runBtn.disabled = false;
     runBtn.title = 'Submit the command preview for execution';
-    runBtn.textContent = 'Scan Now';
     runBtn._cliScanRunHandler = () => {
       CliScanApp._setStatus(container, state, 'Scan Now is not wired to live execution in this build.');
     };
