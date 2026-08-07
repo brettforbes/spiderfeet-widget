@@ -2,10 +2,11 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV2 / AW1–AW3 / R11-06–R20 —
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV3 / AW1–AW3 / R11-06–R20, R11-23 —
  * Composer shell, expand/revert, CanvasGraph viewers, left YAML iframe,
  * stepSelected → CliScanApp, unset-step gating, option-change → YAML setYaml,
- * validation → Scan Now enable, live execute, read-only replay, temp-graph import.
+ * validation → Scan Now / Run Workflow enable, live execute (step + full workflow),
+ * read-only replay, temp-graph import.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -33,6 +34,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._optionYamlTimer = null;
   /** Debounce for CliScanApp → setYaml (R11-14). */
   Composer.OPTION_YAML_DEBOUNCE_MS = 200;
+  /** True while AO2 full-workflow execute is in flight (R11-23). */
+  Composer._workflowRunBusy = false;
 
   /**
    * R11-15 / AU2 — Scan Now enablement from editor validation only (no client guess).
@@ -43,6 +46,17 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    */
   Composer.runEnabledFromValidation = function (validation, hasRun) {
     if (hasRun) return false;
+    return !!(validation && validation.ok);
+  };
+
+  /**
+   * R11-23 / AV3 — Run Workflow enablement from editor validation only.
+   * Disabled while a full-workflow run is in flight.
+   * @param {{ ok?: boolean }|null|undefined} validation
+   * @returns {boolean}
+   */
+  Composer.workflowRunEnabledFromValidation = function (validation) {
+    if (Composer._workflowRunBusy) return false;
     return !!(validation && validation.ok);
   };
 
@@ -359,6 +373,283 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       app.setExecuteContext(Composer.resolveExecuteContext(Composer._selectedStepId));
     }
     return app.runScanNow();
+  };
+
+  /**
+   * Resolve project id for execute / workflow sync.
+   * @returns {string|null}
+   */
+  Composer.resolveProjectId = function () {
+    if (Composer.selectedProjectId) return String(Composer.selectedProjectId);
+    const project = Composer.selectedProject;
+    if (project && typeof project === 'object') {
+      const id = project.project_id || project.id;
+      if (id) return String(id);
+    }
+    return null;
+  };
+
+  /**
+   * Apply editor validation to the Composer **Run Workflow** button (R11-23 / AV3).
+   * @param {{ ok?: boolean }|null|undefined} validation
+   */
+  Composer.applyValidationToRunWorkflow = function (validation) {
+    const btn = document.getElementById('composer-run-workflow');
+    if (!btn) return;
+    const enabled = Composer.workflowRunEnabledFromValidation(validation);
+    btn.disabled = !enabled;
+    btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    if (Composer._workflowRunBusy) {
+      btn.textContent = 'Running…';
+      btn.title = 'Full workflow execute in progress';
+    } else {
+      btn.textContent = 'Run Workflow';
+      btn.title = enabled
+        ? 'Run the full multi-step workflow (editor validated)'
+        : 'Disabled until the YAML DSL Workflow editor reports validationResult.ok';
+    }
+  };
+
+  /**
+   * Persist current editor YAML to TypeDB so AO2 runs the validated document (R11-23).
+   * @param {string} workflowId
+   * @param {string} yaml
+   * @param {string|null} projectId
+   * @returns {Promise<{ ok: boolean, created?: boolean, error?: string }>}
+   */
+  Composer.syncWorkflowYaml = async function (workflowId, yaml, projectId) {
+    const api = Widgets.SpiderfeetApi;
+    if (!api?.updateWorkflow) {
+      return { ok: false, error: 'SpiderfeetApi.updateWorkflow unavailable' };
+    }
+    const body = { workflow_yaml: yaml };
+    try {
+      let existing = null;
+      if (api.getWorkflow) {
+        try {
+          existing = await api.getWorkflow(workflowId);
+        } catch (_err) {
+          existing = null;
+        }
+      }
+      const exists = !!(existing && existing.ok === true);
+
+      if (exists) {
+        const updated = await api.updateWorkflow(workflowId, body);
+        if (updated && updated.ok === false) {
+          return {
+            ok: false,
+            error: updated.message || updated.detail || 'updateWorkflow failed',
+          };
+        }
+        return { ok: true, created: false };
+      }
+
+      if (!projectId || !api.createWorkflow) {
+        return {
+          ok: false,
+          error: 'Workflow not found and no project_id to create it',
+        };
+      }
+      const created = await api.createWorkflow(projectId, {
+        workflow_id: workflowId,
+        name: workflowId,
+        workflow_yaml: yaml,
+      });
+      if (created && created.ok === false) {
+        return {
+          ok: false,
+          error: created.message || created.detail || 'createWorkflow failed',
+        };
+      }
+      Composer.selectedWorkflow = created || { workflow_id: workflowId };
+      return { ok: true, created: true };
+    } catch (err) {
+      return { ok: false, error: (err && err.message) || String(err) };
+    }
+  };
+
+  /**
+   * After AO2 completes, import scan_graph exports into Temporary Subgraph Viewer.
+   * @param {object} result executeWorkflow response
+   * @returns {Promise<number>} number of discrete imports
+   */
+  Composer._importWorkflowTempGraphs = async function (result) {
+    const steps = Array.isArray(result?.steps) ? result.steps : [];
+    const api = Widgets.SpiderfeetApi;
+    const temp = Widgets.ComposerTempGraph;
+    if (!temp?.handleScanComplete || !api) return 0;
+
+    let imported = 0;
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (!step || step.status === 'error' || step.skipped) continue;
+      const stepId = step.step_id || step.stepId;
+      if (!stepId) continue;
+
+      let detail = null;
+      const scanInstanceId = step.scan_instance_id || step.scanInstanceId;
+      if (scanInstanceId && api.getScanStep) {
+        try {
+          const payload = await api.getScanStep(scanInstanceId);
+          if (payload && payload.ok !== false && api.scanStepToDetail) {
+            detail = api.scanStepToDetail(payload);
+          }
+        } catch (err) {
+          console.warn('Composer._importWorkflowTempGraphs getScanStep', err);
+        }
+      }
+
+      const outcome = {
+        ok: true,
+        kind: 'complete',
+        detail: detail || null,
+        result: detail || step,
+      };
+      try {
+        const hit = temp.handleScanComplete(outcome, { stepId });
+        if (hit?.subgraphId) imported += 1;
+      } catch (err) {
+        console.warn('Composer._importWorkflowTempGraphs import', err);
+      }
+    }
+    return imported;
+  };
+
+  /**
+   * Run the full validated multi-step workflow (R11-23 / AV3).
+   * @returns {Promise<object|null>}
+   */
+  Composer.runWorkflow = async function () {
+    if (Composer._workflowRunBusy) return null;
+
+    const validation =
+      Widgets.ComposerWorkflow?.getLastValidation?.() ||
+      Widgets.ComposerWorkflow?._lastValidation ||
+      null;
+    if (!Composer.workflowRunEnabledFromValidation(validation)) {
+      Composer.setStatus(
+        'Run Workflow disabled — wait for the YAML editor to report validationResult.ok.'
+      );
+      Composer.applyValidationToRunWorkflow(validation);
+      return null;
+    }
+
+    const yaml = Widgets.ComposerWorkflow?.getWorkflowYaml?.() || '';
+    if (!String(yaml).trim()) {
+      Composer.setStatus('Run Workflow: editor YAML is empty.');
+      return null;
+    }
+
+    const workflowId = Composer.resolveWorkflowId();
+    if (!workflowId) {
+      Composer.setStatus(
+        'Run Workflow: cannot resolve workflow id (set YAML `id:` or select a project workflow).'
+      );
+      return null;
+    }
+
+    const projectId = Composer.resolveProjectId();
+    const api = Widgets.SpiderfeetApi;
+    if (!api?.executeWorkflow) {
+      Composer.setStatus('Run Workflow: SpiderfeetApi.executeWorkflow unavailable.');
+      return null;
+    }
+
+    Composer._workflowRunBusy = true;
+    Composer.applyValidationToRunWorkflow(validation);
+    Composer.setStatus(`Syncing workflow YAML for ${workflowId}…`);
+
+    try {
+      const sync = await Composer.syncWorkflowYaml(workflowId, yaml, projectId);
+      if (!sync.ok) {
+        Composer.setStatus(`Run Workflow: YAML sync failed — ${sync.error || 'unknown'}`);
+        return null;
+      }
+
+      Composer.setStatus(
+        sync.created
+          ? `Created workflow ${workflowId}; executing multi-step run…`
+          : `Executing multi-step workflow ${workflowId}…`
+      );
+
+      const body = {};
+      if (projectId) body.project_id = projectId;
+      const result = await api.executeWorkflow(workflowId, body);
+
+      if (!result || result.ok === false) {
+        const msg =
+          result?.message ||
+          result?.detail ||
+          result?.error ||
+          'executeWorkflow failed';
+        Composer.setStatus(`Run Workflow failed: ${msg}`);
+        return result || null;
+      }
+
+      const succeeded = result.succeeded != null ? result.succeeded : null;
+      const failed = result.failed != null ? result.failed : null;
+      const skipped = result.skipped != null ? result.skipped : null;
+      const stepCount =
+        result.step_count != null
+          ? result.step_count
+          : Array.isArray(result.steps)
+            ? result.steps.length
+            : null;
+
+      let imported = 0;
+      try {
+        imported = await Composer._importWorkflowTempGraphs(result);
+      } catch (err) {
+        console.warn('Composer.runWorkflow temp import', err);
+      }
+
+      const parts = [
+        result.message || `Workflow ${workflowId} finished (${result.status || 'done'})`,
+      ];
+      if (stepCount != null) {
+        parts.push(
+          `steps ${succeeded ?? '?'}/${stepCount}` +
+            (failed != null ? `, failed ${failed}` : '') +
+            (skipped != null ? `, skipped ${skipped}` : '')
+        );
+      }
+      if (imported > 0) {
+        parts.push(
+          `Temporary viewer: +${imported} discrete subgraph${imported === 1 ? '' : 's'}`
+        );
+      }
+      Composer.setStatus(parts.join(' · '));
+      return result;
+    } catch (err) {
+      Composer.setStatus(
+        `Run Workflow error: ${(err && err.message) || String(err)}`
+      );
+      return null;
+    } finally {
+      Composer._workflowRunBusy = false;
+      const last =
+        Widgets.ComposerWorkflow?.getLastValidation?.() ||
+        Widgets.ComposerWorkflow?._lastValidation ||
+        validation;
+      Composer.applyValidationToRunWorkflow(last);
+    }
+  };
+
+  /** Bind Run Workflow toolbar button (R11-23). */
+  Composer._bindRunWorkflowButton = function () {
+    if (Composer._runWorkflowBound) return;
+    const btn = document.getElementById('composer-run-workflow');
+    if (!btn) return;
+    Composer._runWorkflowBound = true;
+    btn.addEventListener('click', () => {
+      Composer.runWorkflow();
+    });
+    const last =
+      Widgets.ComposerWorkflow?.getLastValidation?.() ||
+      Widgets.ComposerWorkflow?._lastValidation ||
+      null;
+    Composer.applyValidationToRunWorkflow(last);
   };
 
   /**
@@ -881,12 +1172,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     });
   };
 
-  /** R11-15 / AU2 — editor validationResult messages drive Scan Now enable/disable. */
+  /** R11-15 / AU2 / R11-23 — editor validationResult drives Scan Now + Run Workflow. */
   Composer._bindValidationResultListener = function () {
     if (Composer._validationResultBound) return;
     Composer._validationResultBound = true;
     window.addEventListener('composer-workflow:validation-result', (event) => {
-      Composer.applyValidationToScanNow(event?.detail || null);
+      const detail = event?.detail || null;
+      Composer.applyValidationToScanNow(detail);
+      Composer.applyValidationToRunWorkflow(detail);
     });
   };
 
@@ -898,6 +1191,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.bindLayoutControls(el);
     Composer._bindStepSelectedListener();
     Composer._bindValidationResultListener();
+    Composer._bindRunWorkflowButton();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
@@ -909,7 +1203,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       Widgets.ComposerTempGraph.initFromComposer();
     }
     Composer.setStatus(
-      'Composer layout ready — select a YAML step to slide in CliScanApp.'
+      'Composer layout ready — select a YAML step for Scan Now, or Run Workflow when valid.'
     );
   };
 

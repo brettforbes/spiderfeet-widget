@@ -98,6 +98,17 @@ When **Scan Now** is enabled and `executeContext` is set:
 
 Composer passes `executeContext` from the selected project/workflow YAML `id:` + step id. Programmatic: `Composer.executeSelectedStep()`.
 
+### Full workflow execute (R11-23 / AV3)
+
+Composer toolbar **Run Workflow** (enabled only when the YAML DSL iframe reports `validationResult.ok`):
+
+1. Syncs the current editor YAML via `updateWorkflow` (or `createWorkflow` if missing)
+2. Calls `Widgets.SpiderfeetApi.executeWorkflow(workflowId, { project_id })`
+3. Shows succeeded/failed/skipped summary on Composer status
+4. Imports each completed step with `context.export: scan_graph` into the Temporary Subgraph Viewer
+
+Programmatic: `Composer.runWorkflow()`. Per-step Scan Now is unchanged.
+
 ### Read-only replay (R11-17 / AV2)
 
 When Composer selects a step that already has a persisted `scan_step`:
