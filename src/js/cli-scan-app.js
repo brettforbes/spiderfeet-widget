@@ -263,7 +263,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
   };
 
-  /** AU2 will call this when step options validate; AT2 keeps it false for unset steps. */
+  /** Composer AU2 calls this when editor `validationResult.ok` changes (R11-15). */
   CliScanApp.setRunEnabled = function (state, runEnabled) {
     state.runEnabled = Boolean(runEnabled);
     state._runEnabledPinned = true;
@@ -472,12 +472,12 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     runBtn.classList.remove('active');
     runBtn.removeAttribute('aria-pressed');
     runBtn.textContent = 'Scan Now';
-    // R11-13 / AT2: unset steps keep Scan Now disabled; AU2 enables via runEnabled.
+    // R11-13 / R11-15: unset steps stay disabled until host sets runEnabled from validationResult.
     if (!state.runEnabled) {
       runBtn.disabled = true;
       runBtn.title = state.hasRun
         ? 'Scan Now is disabled for this step.'
-        : 'Scan Now disabled until step options are valid (unset step).';
+        : 'Scan Now disabled until the editor reports this step valid.';
       return;
     }
     runBtn.disabled = false;
