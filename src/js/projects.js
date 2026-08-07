@@ -477,48 +477,43 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     }
   };
 
+  /**
+   * Update Composer chrome (label / meta / status) without replacing the AR1 layout.
+   */
   Projects.renderComposerPlaceholder = function (project, note) {
     const label = document.getElementById('composer-project-label');
-    const main = document.getElementById('composer-main');
+    const meta = document.getElementById('composer-project-meta');
     const id = Projects.projectId(project);
+
     if (label) {
       label.textContent = id ? `Project ${id}` : 'No project selected';
     }
-    if (!main) return;
 
     if (!id) {
-      main.innerHTML = `
-        <div class="text-center py-5 text-body-secondary" id="composer-placeholder">
-          <p class="mb-1">Composer layout arrives in SPEC-011 AR1.</p>
-          <p class="small mb-0">Select a project from the Projects table to load it here.</p>
-        </div>`;
-      Projects.setComposerStatus('No project selected.');
+      if (meta) {
+        meta.textContent = '';
+        meta.classList.add('d-none');
+      }
+      Projects.setComposerStatus('No project selected. Choose one from Projects.');
       return;
     }
 
     const stix = Projects.stixIncidentId(project) || '—';
     const created = Projects.formatCreated(Projects.projectCreated(project));
     const workflows = Projects.workflowCount(project);
-    const noteHtml = note
-      ? `<div class="alert alert-warning py-2 small mt-3 mb-0">${Projects.escapeHtml(note)}</div>`
-      : '';
+    if (meta) {
+      meta.textContent = `${created} · ${workflows} workflow(s) · STIX ${stix}`;
+      meta.classList.remove('d-none');
+      if (note) {
+        meta.title = note;
+      } else {
+        meta.removeAttribute('title');
+      }
+    }
 
-    main.innerHTML = `
-      <div id="composer-placeholder">
-        <p class="mb-2">Composer shell placeholder (AR1 will replace this layout).</p>
-        <dl class="row small mb-0">
-          <dt class="col-sm-3">Project ID</dt>
-          <dd class="col-sm-9"><code>${Projects.escapeHtml(id)}</code></dd>
-          <dt class="col-sm-3">Created</dt>
-          <dd class="col-sm-9">${Projects.escapeHtml(created)}</dd>
-          <dt class="col-sm-3">Workflows</dt>
-          <dd class="col-sm-9">${Projects.escapeHtml(String(workflows))}</dd>
-          <dt class="col-sm-3">STIX incident</dt>
-          <dd class="col-sm-9"><code>${Projects.escapeHtml(stix)}</code></dd>
-        </dl>
-        ${noteHtml}
-      </div>`;
-    Projects.setComposerStatus(`Loaded project ${id}.`);
+    Projects.setComposerStatus(
+      note ? `Loaded project ${id} (partial).` : `Loaded project ${id}.`
+    );
   };
 
   Projects.openProjectInComposer = async function (projectId) {
