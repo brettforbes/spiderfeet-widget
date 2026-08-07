@@ -56,7 +56,17 @@ window.Widgets.Theme = window.Widgets.Theme || {};
       window.Widgets.DataViewer.syncTheme(next);
     }
 
-    window.dispatchEvent(new CustomEvent('shell:theme-changed', { detail: { theme: next } }));
+    // fromViewer / fromWorkflow let embed hosts skip echo setTheme round-trips
+    // after applying a theme that originated inside an iframe.
+    window.dispatchEvent(
+      new CustomEvent('shell:theme-changed', {
+        detail: {
+          theme: next,
+          fromViewer: !!meta.fromViewer,
+          fromWorkflow: !!meta.fromWorkflow,
+        },
+      })
+    );
     return next;
   };
 

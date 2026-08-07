@@ -2,15 +2,14 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
 /**
- * SPEC-011 AS1–AS2 / R11-09–R11-10 — Collapsing left host for yaml-workflow-widget
+ * SPEC-011 AS1–AS3 / R11-09–R11-11 — Collapsing left host for yaml-workflow-widget
  * iframe + HOST_PROTOCOL handshake (ready → setTheme + setYaml; yamlChanged /
- * validationResult listeners).
+ * validationResult) + bidirectional theme sync (Widgets.Theme ↔ setTheme /
+ * themeChanged).
  *
  * Width states (Composer.setLeftState): collapsed (0) | partial (≈3, default) | full (12).
  * - partial / collapsed: `?embed=1` (diagram-only)
  * - full: no embed param (YAML code + diagram)
- *
- * Theme re-sync on host toggle lands in AS3.
  */
 (function (ComposerWorkflow, Widgets, document, window) {
   'use strict';
@@ -73,8 +72,12 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   ComposerWorkflow._lastValidation = null;
   /** @type {boolean} */
   ComposerWorkflow._listening = false;
+  /** @type {boolean} */
+  ComposerWorkflow._themeListening = false;
   /** @type {string|null} */
   ComposerWorkflow._expectedOrigin = null;
+  /** @type {'light'|'dark'|null} last theme pushed to (or accepted from) the iframe */
+  ComposerWorkflow._syncedTheme = null;
 
   ComposerWorkflow.defaultBaseUrl = function () {
     const root = document.getElementById('widget-root');
@@ -198,12 +201,53 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   };
 
   /**
+   * Normalize a theme token to light|dark.
+   * @param {unknown} theme
+   * @returns {'light'|'dark'|null}
+   */
+  ComposerWorkflow._normalizeTheme = function (theme) {
+    if (theme === 'dark' || theme === 'light') return theme;
+    return null;
+  };
+
+  /**
+   * Push theme into the yaml-workflow-widget iframe (R11-11).
+   * @param {'light'|'dark'} [theme]
+   * @param {{ force?: boolean }} [options]
+   * @returns {boolean}
+   */
+  ComposerWorkflow.pushTheme = function (theme, options) {
+    const next = ComposerWorkflow._normalizeTheme(theme) || ComposerWorkflow._currentTheme();
+    const force = !!(options && options.force);
+    if (!ComposerWorkflow._ready) {
+      ComposerWorkflow._syncedTheme = next;
+      return false;
+    }
+    if (!force && ComposerWorkflow._syncedTheme === next) {
+      return true;
+    }
+    ComposerWorkflow._syncedTheme = next;
+    return ComposerWorkflow.postToWidget('setTheme', { theme: next });
+  };
+
+  /**
+   * Host navbar / Theme.toggle → re-theme the embedded editor.
+   * Skip when the change originated from the iframe (themeChanged → apply).
+   * @param {CustomEvent} event
+   */
+  ComposerWorkflow._onShellThemeChanged = function (event) {
+    if (event?.detail?.fromWorkflow) return;
+    const theme = ComposerWorkflow._normalizeTheme(event?.detail?.theme);
+    if (!theme) return;
+    ComposerWorkflow.pushTheme(theme, { force: true });
+  };
+
+  /**
    * Push current theme + YAML after `ready` (R11-10 handshake).
    */
   ComposerWorkflow._pushHandshake = function () {
     if (!ComposerWorkflow._ready) return;
-    const theme = ComposerWorkflow._currentTheme();
-    ComposerWorkflow.postToWidget('setTheme', { theme });
+    ComposerWorkflow.pushTheme(ComposerWorkflow._currentTheme(), { force: true });
     ComposerWorkflow.postToWidget('setYaml', { yaml: ComposerWorkflow._yaml || '' });
     if (Widgets.Composer?.setStatus) {
       Widgets.Composer.setStatus('Workflow editor: theme + YAML pushed after ready.');
@@ -347,6 +391,23 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         }
         break;
       }
+      case 'themeChanged': {
+        // Iframe applied a theme (host setTheme echo or editor UI) — sync shell.
+        const raw =
+          typeof data.payload === 'string'
+            ? data.payload
+            : data.payload?.theme;
+        const theme = ComposerWorkflow._normalizeTheme(raw);
+        if (!theme) break;
+        ComposerWorkflow._syncedTheme = theme;
+        if (Widgets.Theme && typeof Widgets.Theme.apply === 'function') {
+          if (Widgets.Theme.get() !== theme) {
+            Widgets.Theme.apply(theme, { fromWorkflow: true });
+          }
+        }
+        ComposerWorkflow._dispatch('composer-workflow:theme-changed', { theme });
+        break;
+      }
       default:
         break;
     }
@@ -356,6 +417,13 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     if (ComposerWorkflow._listening) return;
     ComposerWorkflow._listening = true;
     window.addEventListener('message', ComposerWorkflow._handleWidgetMessage);
+    ComposerWorkflow._ensureThemeListening();
+  };
+
+  ComposerWorkflow._ensureThemeListening = function () {
+    if (ComposerWorkflow._themeListening) return;
+    ComposerWorkflow._themeListening = true;
+    window.addEventListener('shell:theme-changed', ComposerWorkflow._onShellThemeChanged);
   };
 
   ComposerWorkflow._applyIframeLayout = function (iframe) {
