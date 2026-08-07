@@ -65,7 +65,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       canvasId: 'composer-temp-subgraph-canvas',
       tooltipId: 'composer-temp-subgraph-tooltip',
       label: 'Temporary Subgraph Viewer',
-      /** Ready for AW temporary_id imports; empty until then. */
+      /** AW1–AW2 temporary_id imports + discrete remove toggles. */
       initialGraph: { nodes: [], links: [] },
     },
   };
@@ -904,6 +904,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.mountCanvasViewers();
     if (Widgets.ComposerWorkflow?.initFromComposer) {
       Widgets.ComposerWorkflow.initFromComposer();
+    }
+    if (Widgets.ComposerTempGraph?.initFromComposer) {
+      Widgets.ComposerTempGraph.initFromComposer();
     }
     Composer.setStatus(
       'Composer layout ready — select a YAML step to slide in CliScanApp.'
