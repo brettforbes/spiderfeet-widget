@@ -2,7 +2,7 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR2 / R11-06–R11-07 — Composer pane shell + central pane expand/revert.
+ * SPEC-011 AR1–AR3 / R11-06–R11-08 — Composer shell, expand/revert, CanvasGraph viewers.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -16,17 +16,27 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     full: { label: 'full', leftCols: 12, centerCols: 0 },
   };
 
-  /** Central viewer panes that support full-screen expand (R11-07). */
+  /** Central viewer panes that support full-screen expand (R11-07) + CanvasGraph (R11-08). */
   Composer.EXPANDABLE_PANES = {
     'project-context': {
       sectionId: 'composer-project-context',
       buttonId: 'composer-context-expand',
+      stageId: 'composer-project-context-stage',
+      canvasId: 'composer-project-context-canvas',
+      tooltipId: 'composer-project-context-tooltip',
       label: 'Project Context Viewer',
+      /** Empty by design this spec (future project content). */
+      initialGraph: { nodes: [], links: [] },
     },
     'temp-subgraph': {
       sectionId: 'composer-temp-subgraph',
       buttonId: 'composer-temp-expand',
+      stageId: 'composer-temp-subgraph-stage',
+      canvasId: 'composer-temp-subgraph-canvas',
+      tooltipId: 'composer-temp-subgraph-tooltip',
       label: 'Temporary Subgraph Viewer',
+      /** Ready for AW temporary_id imports; empty until then. */
+      initialGraph: { nodes: [], links: [] },
     },
   };
 
@@ -34,6 +44,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._rightOpen = false;
   /** @type {null|'project-context'|'temp-subgraph'} */
   Composer._expandedPane = null;
+  /** @type {Record<string, object|null>} */
+  Composer._graphs = {
+    'project-context': null,
+    'temp-subgraph': null,
+  };
+  /** @type {Record<string, number>} */
+  Composer._graphMountGeneration = {
+    'project-context': 0,
+    'temp-subgraph': 0,
+  };
 
   Composer.setStatus = function (message) {
     const el = document.getElementById('composer-status-text');
@@ -210,6 +230,97 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.setExpandedPane(Composer._expandedPane === paneKey ? null : paneKey);
   };
 
+  /**
+   * Return the live CanvasGraph API for a central pane (null if not mounted).
+   * @param {'project-context'|'temp-subgraph'} paneKey
+   */
+  Composer.getCanvasGraph = function (paneKey) {
+    return Composer._graphs[paneKey] || null;
+  };
+
+  /**
+   * Destroy a pane's CanvasGraph instance if present.
+   * @param {'project-context'|'temp-subgraph'} paneKey
+   */
+  Composer.destroyCanvasGraph = function (paneKey) {
+    const api = Composer._graphs[paneKey];
+    if (api?.destroy) {
+      try {
+        api.destroy();
+      } catch (err) {
+        console.warn('Composer.destroyCanvasGraph', paneKey, err);
+      }
+    }
+    Composer._graphs[paneKey] = null;
+  };
+
+  /**
+   * Mount (or remount) Viz.CanvasGraph in a central pane.
+   * Empty `{nodes:[],links:[]}` is valid and must not throw (R11-08).
+   * @param {'project-context'|'temp-subgraph'} paneKey
+   * @param {{nodes?: Array, links?: Array}} [graph]
+   */
+  Composer.mountCanvasGraph = function (paneKey, graph) {
+    const meta = Composer.EXPANDABLE_PANES[paneKey];
+    if (!meta) return null;
+    if (!window.Viz?.CanvasGraph?.create) {
+      console.error('Composer.mountCanvasGraph: Viz.CanvasGraph unavailable');
+      Composer.setStatus('CanvasGraph unavailable.');
+      return null;
+    }
+
+    const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+    const links = Array.isArray(graph?.links) ? graph.links : [];
+    const generation = ++Composer._graphMountGeneration[paneKey];
+    Composer.destroyCanvasGraph(paneKey);
+
+    const stage = document.getElementById(meta.stageId);
+    const canvasEl = document.getElementById(meta.canvasId);
+    if (!stage || !canvasEl) {
+      console.error('Composer.mountCanvasGraph: missing stage/canvas for', paneKey);
+      return null;
+    }
+
+    const tryMount = (attempts) => {
+      if (generation !== Composer._graphMountGeneration[paneKey]) return;
+      const rect = stage.getBoundingClientRect();
+      // Wait for layout when Composer tab / expand has not sized the stage yet.
+      if ((rect.width <= 20 || rect.height <= 20) && attempts < 60) {
+        requestAnimationFrame(() => tryMount(attempts + 1));
+        return;
+      }
+      try {
+        Composer._graphs[paneKey] = window.Viz.CanvasGraph.create({
+          canvas: `#${meta.canvasId}`,
+          tooltip: `#${meta.tooltipId}`,
+          nodes,
+          links,
+          variant: 'default',
+          nodeDisplay: 'icons',
+          linkLabels: false,
+          linkDistance: 80,
+        });
+      } catch (err) {
+        console.error('Composer.mountCanvasGraph failed', paneKey, err);
+        Composer._graphs[paneKey] = null;
+        Composer.setStatus(`${meta.label}: graph mount failed — ${err.message}`);
+      }
+    };
+    tryMount(0);
+    return Composer._graphs[paneKey];
+  };
+
+  /**
+   * Mount both central CanvasGraph viewers (R11-08).
+   * Project Context starts empty; Temporary viewer is ready for AW data later.
+   */
+  Composer.mountCanvasViewers = function () {
+    Object.keys(Composer.EXPANDABLE_PANES).forEach((paneKey) => {
+      const meta = Composer.EXPANDABLE_PANES[paneKey];
+      Composer.mountCanvasGraph(paneKey, meta.initialGraph || { nodes: [], links: [] });
+    });
+  };
+
   Composer.bindLayoutControls = function (root) {
     root.querySelectorAll('button[data-composer-left-state]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -252,7 +363,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
-    Composer.setStatus('Composer layout ready.');
+    Composer.mountCanvasViewers();
+    Composer.setStatus('Composer layout ready — CanvasGraph viewers mounted.');
   };
 
   Widgets.watchDOMForComponent(Composer.selectorPanel, Composer.initPanel);
