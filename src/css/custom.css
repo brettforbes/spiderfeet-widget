@@ -397,6 +397,14 @@ body {
   cursor: not-allowed;
 }
 
+/* R11-13 / AT2 — unset step: lock Text|Structured|Graph|Report */
+.cli-scan-tabs .nav-link.disabled,
+.cli-scan-outputs-locked .cli-scan-tabs .nav-link.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 .cli-scan-pane-scroll {
   overflow: auto;
   max-height: 100%;
