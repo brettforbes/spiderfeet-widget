@@ -2,9 +2,9 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS3 / AT1 / R11-06–R11-12 — Composer shell, expand/revert,
- * CanvasGraph viewers, left YAML iframe width + handshake coordination, and
- * stepSelected → right CliScanApp slide-in.
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1 / R11-06–R14 — Composer shell,
+ * expand/revert, CanvasGraph viewers, left YAML iframe, stepSelected → CliScanApp,
+ * unset-step gating, and option-change → YAML setYaml.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -18,12 +18,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     full: { label: 'full', leftCols: 12, centerCols: 0 },
   };
 
-  /** @type {{ instanceId: string, reload: Function, destroy: Function }|null} */
+  /** @type {{ instanceId: string, reload: Function, destroy: Function, setOnOptionsChange?: Function }|null} */
   Composer._cliScanApp = null;
   /** @type {string|null} */
   Composer._selectedStepId = null;
   /** @type {string|null} */
   Composer._selectedToolId = null;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  Composer._optionYamlTimer = null;
+  /** Debounce for CliScanApp → setYaml (R11-14). */
+  Composer.OPTION_YAML_DEBOUNCE_MS = 200;
 
   /** Central viewer panes that support full-screen expand (R11-07) + CanvasGraph (R11-08). */
   Composer.EXPANDABLE_PANES = {
@@ -186,6 +190,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    * Destroy the mounted Composer CliScanApp instance if any.
    */
   Composer.destroyCliScanApp = function () {
+    if (Composer._optionYamlTimer) {
+      clearTimeout(Composer._optionYamlTimer);
+      Composer._optionYamlTimer = null;
+    }
     if (Composer._cliScanApp?.destroy) {
       try {
         Composer._cliScanApp.destroy();
@@ -217,8 +225,62 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * Seed CliScanApp detail from the step's current workflow `config.argv`.
+   * @param {string} stepId
+   * @returns {{ argv: string[] }|null}
+   */
+  Composer._detailFromStepArgv = function (stepId) {
+    const wf = Widgets.ComposerWorkflow;
+    if (!wf?.parseStepArgv) return null;
+    const ownerId = wf.argvOwnerStepId?.(stepId) || stepId;
+    if (!ownerId) return null;
+    const argv = wf.parseStepArgv(wf.getWorkflowYaml?.() || '', ownerId);
+    if (!argv.length) return null;
+    return { argv };
+  };
+
+  /**
+   * Debounced CliScanApp option → editor YAML update (R11-14 / AU1).
+   * @param {{ argv?: string[] }} snapshot
+   */
+  Composer._onCliScanOptionsChange = function (snapshot) {
+    if (Composer._optionYamlTimer) {
+      clearTimeout(Composer._optionYamlTimer);
+      Composer._optionYamlTimer = null;
+    }
+    Composer._optionYamlTimer = setTimeout(() => {
+      Composer._optionYamlTimer = null;
+      Composer._applyCliScanOptionsToYaml(snapshot);
+    }, Composer.OPTION_YAML_DEBOUNCE_MS);
+  };
+
+  /**
+   * Recompute step argv from CliScanApp options and push setYaml.
+   * @param {{ argv?: string[] }} snapshot
+   */
+  Composer._applyCliScanOptionsToYaml = function (snapshot) {
+    const wf = Widgets.ComposerWorkflow;
+    const stepId = Composer._selectedStepId;
+    if (!wf?.applyStepOptionArgv || !stepId) return;
+    const result = wf.applyStepOptionArgv(stepId, snapshot?.argv || []);
+    if (!result?.ok) {
+      if (result?.reason === 'argv-block-missing') {
+        Composer.setStatus(
+          `Step ${result.stepId || stepId}: no config.argv block to update.`
+        );
+      }
+      return;
+    }
+    if (result.unchanged) return;
+    Composer.setStatus(
+      `Updated ${result.stepId} argv from CliScanApp options (${(result.argv || []).length} tokens).`
+    );
+  };
+
+  /**
    * Mount CliScanApp for a resolved workflow tool step (edit-run).
    * Unset steps (no prior run): Scan tab only, Scan Now disabled, options editable (R11-13 / AT2).
+   * Seeds options from workflow argv and pushes option edits back via setYaml (R11-14 / AU1).
    * @param {{ toolId: string, stepId: string, title?: string, hasRun?: boolean, runEnabled?: boolean, detail?: object|null }} opts
    */
   Composer.mountCliScanApp = function (opts) {
@@ -238,7 +300,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     // Composer has no run store yet (AV1); default unset gating until a host passes hasRun.
     const hasRun = opts?.hasRun === true;
     const runEnabled = opts?.runEnabled === true;
-    const detail = opts?.detail ?? null;
+    const detail = opts?.detail ?? Composer._detailFromStepArgv(stepId);
+    const onOptionsChange = Composer._onCliScanOptionsChange;
 
     // Same tool + already mounted → reload detail only (avoid destroy storm).
     if (
@@ -256,6 +319,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           detail,
           hasRun,
           runEnabled,
+          onOptionsChange,
         });
       } catch (err) {
         console.warn('Composer.mountCliScanApp reload failed', err);
@@ -279,6 +343,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         detail,
         hasRun,
         runEnabled,
+        onOptionsChange,
         instanceId: 'composer-cli-scan',
         dataSource: { contentBase: '/content', corpusBase: '/cli-corpus' },
       });

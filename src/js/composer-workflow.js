@@ -2,10 +2,11 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
 /**
- * SPEC-011 AS1–AS3 / AT1 / R11-09–R11-12 — Collapsing left host for
- * yaml-workflow-widget iframe + HOST_PROTOCOL handshake (ready → setTheme +
+ * SPEC-011 AS1–AS3 / AT1 / AU1 / R11-09–R11-12 / R11-14 — Collapsing left host
+ * for yaml-workflow-widget iframe + HOST_PROTOCOL handshake (ready → setTheme +
  * setYaml; yamlChanged / validationResult / stepSelected) + bidirectional
- * theme sync (Widgets.Theme ↔ setTheme / themeChanged).
+ * theme sync (Widgets.Theme ↔ setTheme / themeChanged) + CliScanApp option →
+ * step config.argv → setYaml round-trip.
  *
  * Width states (Composer.setLeftState): collapsed (0) | partial (≈3, default) | full (12).
  * - partial / collapsed: `?embed=1` (diagram-only)
@@ -278,6 +279,236 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
       toolId,
       openTool: !!(toolId && step),
     };
+  };
+
+  /**
+   * Resolve the workflow step id that owns config.argv (parent for subtasks).
+   * @param {string} stepId
+   * @returns {string}
+   */
+  ComposerWorkflow.argvOwnerStepId = function (stepId) {
+    const classified = ComposerWorkflow.classifyStepId(stepId);
+    if (classified.kind === 'subtask') return classified.parentId || '';
+    if (classified.kind === 'step') return classified.stepId || '';
+    return '';
+  };
+
+  /**
+   * Unquote a YAML scalar (simple single/double quotes).
+   * @param {string} raw
+   * @returns {string}
+   */
+  ComposerWorkflow._unquoteYamlScalar = function (raw) {
+    const s = String(raw ?? '').trim();
+    if (
+      (s.startsWith('"') && s.endsWith('"')) ||
+      (s.startsWith("'") && s.endsWith("'"))
+    ) {
+      try {
+        if (s.startsWith('"')) return JSON.parse(s);
+      } catch (_err) {
+        /* fall through */
+      }
+      return s.slice(1, -1);
+    }
+    return s;
+  };
+
+  /**
+   * Format one argv list item for workflow YAML.
+   * @param {string} token
+   * @param {string} itemIndent whitespace before `- `
+   * @returns {string}
+   */
+  ComposerWorkflow._formatArgvYamlItem = function (token, itemIndent) {
+    return `${itemIndent}- ${JSON.stringify(String(token))}`;
+  };
+
+  /**
+   * Locate the `argv:` block for a step id inside workflow YAML.
+   * @param {string} yaml
+   * @param {string} stepId
+   * @returns {{
+   *   argv: string[],
+   *   argvLineIndex: number,
+   *   listStart: number,
+   *   listEnd: number,
+   *   itemIndent: string,
+   *   lines: string[]
+   * }|null}
+   */
+  ComposerWorkflow._locateStepArgvBlock = function (yaml, stepId) {
+    if (!stepId || typeof stepId !== 'string') return null;
+    const lines = String(yaml ?? '').split(/\r?\n/);
+    let inSteps = false;
+    let inStep = false;
+    let stepIndent = '';
+    let argvLineIndex = -1;
+    let argvIndent = '';
+
+    const idRe = new RegExp(
+      `^(\\s*)-\\s*id:\\s*${stepId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:#.*)?$`
+    );
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^steps:\s*(?:#.*)?$/.test(line)) {
+        inSteps = true;
+        inStep = false;
+        continue;
+      }
+      if (inSteps && line.length && !/^\s/.test(line) && !/^#/.test(line)) {
+        break;
+      }
+      if (!inSteps) continue;
+
+      const idMatch = line.match(idRe);
+      if (idMatch) {
+        inStep = true;
+        stepIndent = idMatch[1] || '';
+        argvLineIndex = -1;
+        continue;
+      }
+
+      if (!inStep) continue;
+
+      // Next step at same list indent ends this step.
+      if (new RegExp(`^${stepIndent}-\\s*id:\\s*`).test(line)) {
+        break;
+      }
+
+      const argvMatch = line.match(/^(\s+)argv:\s*(?:#.*)?$/);
+      if (argvMatch) {
+        argvLineIndex = i;
+        argvIndent = argvMatch[1];
+        break;
+      }
+    }
+
+    if (argvLineIndex < 0) return null;
+
+    const itemIndent = `${argvIndent}  `;
+    const listStart = argvLineIndex + 1;
+    let listEnd = listStart;
+    const argv = [];
+
+    for (let j = listStart; j < lines.length; j += 1) {
+      const line = lines[j];
+      if (!line.trim() || /^\s*#/.test(line)) {
+        // blank/comment inside list — keep scanning only if still indented under argv
+        if (line.length && !line.startsWith(itemIndent) && line.trim()) break;
+        listEnd = j + 1;
+        continue;
+      }
+      if (!line.startsWith(itemIndent) && line.trim()) {
+        // Dedent to argv key level or less → end of list
+        break;
+      }
+      const itemMatch = line.match(/^\s*-\s+(.+?)\s*(?:#.*)?$/);
+      if (!itemMatch) break;
+      argv.push(ComposerWorkflow._unquoteYamlScalar(itemMatch[1]));
+      listEnd = j + 1;
+    }
+
+    return {
+      argv,
+      argvLineIndex,
+      listStart,
+      listEnd,
+      itemIndent,
+      lines,
+    };
+  };
+
+  /**
+   * Read `config.argv` for a workflow step (lightweight, no YAML lib).
+   * @param {string} [yaml]
+   * @param {string} stepId
+   * @returns {string[]}
+   */
+  ComposerWorkflow.parseStepArgv = function (yaml, stepId) {
+    const block = ComposerWorkflow._locateStepArgvBlock(
+      yaml != null ? yaml : ComposerWorkflow.getWorkflowYaml(),
+      stepId
+    );
+    return block ? block.argv.slice() : [];
+  };
+
+  /**
+   * Merge CliScanApp argv tokens with prior `$…` workflow placeholders.
+   * Placeholders already present in newTokens are kept; missing ones are
+   * re-inserted after their previous neighbour when possible.
+   * @param {string[]} oldArgv
+   * @param {string[]} newTokens
+   * @returns {string[]}
+   */
+  ComposerWorkflow.mergeArgvPreservingPlaceholders = function (oldArgv, newTokens) {
+    const result = Array.isArray(newTokens) ? newTokens.map(String) : [];
+    const present = new Set(result);
+    const prior = Array.isArray(oldArgv) ? oldArgv : [];
+    prior.forEach((tok, idx) => {
+      const t = String(tok);
+      if (!t.startsWith('$')) return;
+      if (present.has(t)) return;
+      const prev = idx > 0 ? String(prior[idx - 1]) : null;
+      if (prev != null) {
+        const prevIdx = result.lastIndexOf(prev);
+        if (prevIdx >= 0) {
+          result.splice(prevIdx + 1, 0, t);
+          present.add(t);
+          return;
+        }
+      }
+      result.push(t);
+      present.add(t);
+    });
+    return result;
+  };
+
+  /**
+   * Replace a step's `config.argv` list in workflow YAML text.
+   * @param {string} yaml
+   * @param {string} stepId
+   * @param {string[]} argvTokens
+   * @returns {string|null} next YAML, or null if the argv block was not found
+   */
+  ComposerWorkflow.patchStepArgv = function (yaml, stepId, argvTokens) {
+    const block = ComposerWorkflow._locateStepArgvBlock(yaml, stepId);
+    if (!block) return null;
+    const tokens = Array.isArray(argvTokens) ? argvTokens.map(String) : [];
+    const newList = tokens.map((t) =>
+      ComposerWorkflow._formatArgvYamlItem(t, block.itemIndent)
+    );
+    const nextLines = block.lines
+      .slice(0, block.listStart)
+      .concat(newList)
+      .concat(block.lines.slice(block.listEnd));
+    return nextLines.join('\n');
+  };
+
+  /**
+   * Apply CliScanApp option argv to a step and push via setYaml (R11-14).
+   * @param {string} stepId diagram or parent step id
+   * @param {string[]} argvTokens from CliScanApp.buildArgvTokens
+   * @returns {{ ok: boolean, stepId?: string, argv?: string[], yaml?: string, reason?: string }}
+   */
+  ComposerWorkflow.applyStepOptionArgv = function (stepId, argvTokens) {
+    const ownerId = ComposerWorkflow.argvOwnerStepId(stepId) || stepId;
+    if (!ownerId) {
+      return { ok: false, reason: 'no-step' };
+    }
+    const yaml = ComposerWorkflow.getWorkflowYaml() || '';
+    const oldArgv = ComposerWorkflow.parseStepArgv(yaml, ownerId);
+    const merged = ComposerWorkflow.mergeArgvPreservingPlaceholders(oldArgv, argvTokens || []);
+    const next = ComposerWorkflow.patchStepArgv(yaml, ownerId, merged);
+    if (next == null) {
+      return { ok: false, stepId: ownerId, reason: 'argv-block-missing', argv: merged };
+    }
+    if (next === yaml) {
+      return { ok: true, stepId: ownerId, argv: merged, yaml: next, unchanged: true };
+    }
+    ComposerWorkflow.setWorkflowYaml(next);
+    return { ok: true, stepId: ownerId, argv: merged, yaml: next };
   };
 
   /**

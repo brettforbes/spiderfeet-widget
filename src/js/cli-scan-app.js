@@ -11,16 +11,18 @@
  *     mode: 'view' | 'edit-run',   // view = read-only examination; edit-run = live form
  *     scenarioKey: 'capstone_…',   // optional label
  *     detail: scenarioDetail,      // optional examination payload (text/structured/graph/md)
+ *                                 // detail.argv (string[]) seeds the form from workflow config.argv
  *     hasRun: false,               // R11-13: false locks Text/Structured/Graph/Report
  *     runEnabled: false,           // R11-13/AU2: false keeps Scan Now disabled in edit-run
+ *     onOptionsChange: (snap) => {}, // edit-run: fires when options change ({ argv, values, toolId })
  *     instanceId: 'my-scan',       // optional; unique per concurrent mount
  *     dataSource: {
  *       contentBase: '/content',   // options-schema + markdown docs
  *       corpusBase: '/cli-corpus', // unused by component today; reserved for hosts
  *     },
  *   });
- *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled });
- *   //        app.setHasRun(true); app.setRunEnabled(true); app.destroy();
+ *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled, onOptionsChange });
+ *   //        app.setHasRun(true); app.setRunEnabled(true); app.getArgvTokens(); app.destroy();
  *
  * Host pages own chrome around the mount. Graph fullscreen toggles
  * `.profiling-graph-host-fullscreen` on `container` so any host can style it.
@@ -128,6 +130,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       detail,
       hasRun,
       runEnabled,
+      onOptionsChange: typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null,
       contentBase,
       corpusBase,
       schema: null,
@@ -159,6 +162,10 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       reload: (next) => CliScanApp.load(state, next),
       setHasRun: (next) => CliScanApp.setHasRun(state, next),
       setRunEnabled: (next) => CliScanApp.setRunEnabled(state, next),
+      getArgvTokens: () => CliScanApp.buildArgvTokens(state),
+      setOnOptionsChange: (fn) => {
+        state.onOptionsChange = typeof fn === 'function' ? fn : null;
+      },
       destroy: () => CliScanApp.destroy(state),
     };
   };
@@ -193,6 +200,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     if (config.mode) state.mode = config.mode === 'edit-run' ? 'edit-run' : 'view';
     state.hasRun = CliScanApp._resolveHasRun(config, state.detail);
     state.runEnabled = CliScanApp._resolveRunEnabled(config, state.mode, state.hasRun);
+    if (Object.prototype.hasOwnProperty.call(config, 'onOptionsChange')) {
+      state.onOptionsChange = typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null;
+    }
 
     CliScanApp._setStatus(container, state, `Loading ${state.toolId}…`);
 
@@ -590,7 +600,10 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
   CliScanApp._initialValues = function (schema, detail) {
     const values = {};
     const cmd = String(detail?.command || '').trim();
-    const cmdParts = cmd ? cmd.split(/\s+/) : [];
+    const argvParts = Array.isArray(detail?.argv)
+      ? detail.argv.map((t) => String(t))
+      : null;
+    const cmdParts = argvParts || (cmd ? cmd.split(/\s+/) : []);
     const rows = CliScanApp._buildRows(schema);
     rows.forEach((row) => {
       let detected = null;
@@ -599,9 +612,10 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         let posVal = '';
         for (let i = 0; i < cmdParts.length; i += 1) {
           const p = cmdParts[i];
-          if (i === 0) continue;
+          if (i === 0 && !argvParts) continue;
           if (p.startsWith('-')) continue;
-          const prev = cmdParts[i - 1];
+          if (p.startsWith('$')) continue;
+          const prev = i > 0 ? cmdParts[i - 1] : '';
           if (prev && prev.startsWith('-') && prev !== '-') continue;
           posVal = p;
           break;
@@ -620,8 +634,55 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           value: row.valueMode !== 'none' && typeof row.flag.default === 'string' ? row.flag.default : '',
         };
     });
-    if (cmd) values.__captured_command = cmd;
+    // Captured command is for view-mode preview only — not argv-seeded edit-run forms.
+    if (cmd && !argvParts) values.__captured_command = cmd;
     return { values, rows };
+  };
+
+  /**
+   * Build workflow `config.argv` tokens from the current option form (no executable).
+   * @param {{ rows?: Array, values?: object }} state
+   * @returns {string[]}
+   */
+  CliScanApp.buildArgvTokens = function (state) {
+    const tokens = [];
+    (state.rows || []).forEach((row) => {
+      const v = state.values?.[row.key];
+      if (!v) return;
+      if (row.isPositional) {
+        if (v.value) tokens.push(String(v.value));
+        return;
+      }
+      if (!v.enabled) return;
+      const tok = row.displayToken;
+      if (row.valueMode === 'none') {
+        tokens.push(tok);
+        return;
+      }
+      if (row.valueMode === 'attached' && v.value !== '' && v.value != null) {
+        tokens.push(`${tok}${v.value}`);
+        return;
+      }
+      tokens.push(tok);
+      if (v.value !== '' && v.value != null) tokens.push(String(v.value));
+    });
+    return tokens;
+  };
+
+  /** Notify host (Composer) of option edits — R11-14 / AU1. */
+  CliScanApp._emitOptionsChange = function (state) {
+    if (state.mode !== 'edit-run') return;
+    if (typeof state.onOptionsChange !== 'function') return;
+    try {
+      state.onOptionsChange({
+        toolId: state.toolId,
+        argv: CliScanApp.buildArgvTokens(state),
+        values: state.values,
+        scenarioKey: state.scenarioKey,
+      });
+    } catch (err) {
+      console.warn('CliScanApp.onOptionsChange failed', err);
+    }
   };
 
   CliScanApp._renderScanForm = function (container, state) {
@@ -782,6 +843,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           }
         }
         CliScanApp._updateCommandPreview(container, state);
+        CliScanApp._emitOptionsChange(state);
       });
     });
 
@@ -795,6 +857,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           state.values[rowKey].enabled = input.value.trim().length > 0;
         }
         CliScanApp._updateCommandPreview(container, state);
+        CliScanApp._emitOptionsChange(state);
       };
       input.addEventListener('input', handler);
       input.addEventListener('change', handler);
