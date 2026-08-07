@@ -2,8 +2,8 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1 / R11-06–R11-09 — Composer shell, expand/revert,
- * CanvasGraph viewers, left YAML iframe width coordination.
+ * SPEC-011 AR1–AR3 / AS1–AS2 / R11-06–R11-10 — Composer shell, expand/revert,
+ * CanvasGraph viewers, left YAML iframe width + handshake coordination.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -129,7 +129,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       btn.classList.toggle('active', btn.dataset.composerLeftState === state);
     });
 
-    // AS1 / R11-09 — keep yaml-workflow-widget iframe mounted; sync embed vs full URL.
+    // AS1–AS2 / R11-09–R11-10 — keep iframe mounted; sync URL; handshake survives collapse.
     if (Widgets.ComposerWorkflow?.syncWidthState) {
       Widgets.ComposerWorkflow.syncWidthState(state);
     }
@@ -373,7 +373,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (Widgets.ComposerWorkflow?.initFromComposer) {
       Widgets.ComposerWorkflow.initFromComposer();
     }
-    Composer.setStatus('Composer layout ready — CanvasGraph + YAML iframe mounted.');
+    Composer.setStatus(
+      'Composer layout ready — CanvasGraph + YAML iframe (handshake waits for ready).'
+    );
   };
 
   Widgets.watchDOMForComponent(Composer.selectorPanel, Composer.initPanel);
