@@ -164,6 +164,8 @@ module.exports = {
                 // AS1 before Composer so deferred initPanel can mount the YAML iframe.
                 paths.src + '/js/composer-workflow.js',
                 paths.src + '/js/composer.js',
+                // AW1 — Temporary Subgraph Viewer import (needs Composer.mountCanvasGraph).
+                paths.src + '/js/composer-temp-graph.js',
                 paths.src + '/js/shell.js',
                 paths.src + '/js/theme.js',
                 paths.src + '/js/graph-shadows.js',
