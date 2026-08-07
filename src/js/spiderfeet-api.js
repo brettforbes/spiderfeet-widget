@@ -374,6 +374,150 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
     return SpiderfeetApi.request(`/scan-steps/${encodeURIComponent(id)}`);
   };
 
+  SpiderfeetApi.listScanSteps = function () {
+    return SpiderfeetApi.request('/scan-steps');
+  };
+
+  /**
+   * DNS namespace UUID — matches `spiderfeet_v2.workflow.typedb_convert._WORKFLOW_ID_NS`.
+   * Used for deterministic `scan_instance_id` (R11-17 / AV2).
+   */
+  SpiderfeetApi.WORKFLOW_ID_NS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+
+  SpiderfeetApi._uuidToBytes = function (uuid) {
+    const hex = String(uuid || '').replace(/-/g, '');
+    if (hex.length !== 32) {
+      throw new Error(`Invalid UUID for namespace: ${uuid}`);
+    }
+    const out = new Uint8Array(16);
+    for (let i = 0; i < 16; i += 1) {
+      out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return out;
+  };
+
+  SpiderfeetApi._bytesToUuid = function (bytes) {
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return (
+      `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
+      `${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+    );
+  };
+
+  /**
+   * RFC 4122 UUID v5 (SHA-1). Sync when Node `crypto` is available; else SubtleCrypto.
+   * @param {string} namespaceUuid
+   * @param {string} name
+   * @returns {string|Promise<string>}
+   */
+  SpiderfeetApi.uuid5 = function (namespaceUuid, name) {
+    const nsBytes = SpiderfeetApi._uuidToBytes(namespaceUuid);
+    const nameStr = String(name ?? '');
+    const finish = (digest) => {
+      const hash = new Uint8Array(digest);
+      hash[6] = (hash[6] & 0x0f) | 0x50;
+      hash[8] = (hash[8] & 0x3f) | 0x80;
+      return SpiderfeetApi._bytesToUuid(hash.slice(0, 16));
+    };
+
+    // Node / webpack sanity scripts
+    try {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      const nodeCrypto = typeof require === 'function' ? require('crypto') : null;
+      if (nodeCrypto?.createHash) {
+        const hash = nodeCrypto
+          .createHash('sha1')
+          .update(Buffer.from(nsBytes))
+          .update(nameStr, 'utf8')
+          .digest();
+        return finish(hash);
+      }
+    } catch (_err) {
+      /* browser path */
+    }
+
+    const nameBytes = new TextEncoder().encode(nameStr);
+    const data = new Uint8Array(nsBytes.length + nameBytes.length);
+    data.set(nsBytes, 0);
+    data.set(nameBytes, nsBytes.length);
+    return crypto.subtle.digest('SHA-1', data).then(finish);
+  };
+
+  /**
+   * Deterministic scan_step id for a workflow DSL step (SPEC-010 typedb_convert).
+   * @param {string} workflowId
+   * @param {string} stepId
+   * @returns {string|Promise<string>}
+   */
+  SpiderfeetApi.scanInstanceIdFor = function (workflowId, stepId) {
+    const wf = String(workflowId || '').trim();
+    const step = String(stepId || '').trim();
+    if (!wf || !step) return '';
+    const uuid = SpiderfeetApi.uuid5(
+      SpiderfeetApi.WORKFLOW_ID_NS,
+      `${wf}:${step}`
+    );
+    if (uuid && typeof uuid.then === 'function') {
+      return uuid.then((id) => `scan_step--${id}`);
+    }
+    return `scan_step--${uuid}`;
+  };
+
+  /**
+   * True when a scan-step / detail payload carries at least one of the four forms.
+   * @param {object|null} payload
+   * @returns {boolean}
+   */
+  SpiderfeetApi.scanStepHasFourForms = function (payload) {
+    const detail = SpiderfeetApi.scanStepToDetail(payload);
+    if (!detail) return false;
+    if (detail.output_text) return true;
+    if (detail.narrative_markdown) return true;
+    if (
+      detail.graph_proposal &&
+      (detail.graph_proposal.nodes?.length ||
+        detail.graph_proposal.edges?.length ||
+        detail.graph_proposal.links?.length)
+    ) {
+      return true;
+    }
+    const structured = detail.structured;
+    if (structured == null) return false;
+    if (typeof structured === 'string') return structured.length > 0;
+    if (typeof structured === 'object') {
+      if (structured.content != null && structured.content !== '') return true;
+      return Object.keys(structured).length > 0;
+    }
+    return false;
+  };
+
+  /**
+   * Load a persisted prior run for workflow+step (R11-17 / AV2).
+   * Uses deterministic scan_instance_id; 404 / empty forms → null (unset step).
+   * @param {string} workflowId
+   * @param {string} stepId
+   * @returns {Promise<{ scanInstanceId: string, payload: object, detail: object }|null>}
+   */
+  SpiderfeetApi.fetchPriorScanStep = async function (workflowId, stepId) {
+    const wf = String(workflowId || '').trim();
+    const step = String(stepId || '').trim();
+    if (!wf || !step) return null;
+
+    let scanInstanceId = SpiderfeetApi.scanInstanceIdFor(wf, step);
+    if (scanInstanceId && typeof scanInstanceId.then === 'function') {
+      scanInstanceId = await scanInstanceId;
+    }
+    if (!scanInstanceId) return null;
+
+    const payload = await SpiderfeetApi.getScanStep(scanInstanceId);
+    if (!payload || payload.ok === false) return null;
+    if (!SpiderfeetApi.scanStepHasFourForms(payload)) return null;
+
+    const detail = SpiderfeetApi.scanStepToDetail(payload);
+    if (!detail) return null;
+    return { scanInstanceId, payload, detail };
+  };
+
   // —— Contexts ————————————————————————————————————————————————
 
   SpiderfeetApi.getTemporaryContext = function (projectId) {
