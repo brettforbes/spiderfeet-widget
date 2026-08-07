@@ -32,8 +32,7 @@
             <button
               class="nav-link text-white-50 px-2 py-1"
               type="button"
-              disabled
-              title="Stage 2 — not yet implemented"
+              data-shell-tab="composer"
             >
               Composer
             </button>
@@ -146,6 +145,15 @@
           <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Projects</h2>
           <button
             type="button"
+            class="btn btn-sm btn-primary"
+            id="projects-new"
+            title="Create a new project"
+          >
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            New Project
+          </button>
+          <button
+            type="button"
             class="btn btn-sm btn-outline-secondary"
             id="projects-refresh"
             title="Refresh projects"
@@ -154,6 +162,12 @@
             <span class="visually-hidden">Refresh</span>
           </button>
         </div>
+        <div
+          class="px-3 pt-2 flex-shrink-0 d-none"
+          id="projects-alert"
+          role="alert"
+          aria-live="polite"
+        ></div>
         <div class="flex-grow-1 overflow-auto p-3" id="projects-main">
           <div class="d-flex align-items-center justify-content-center py-5 text-body-secondary" role="status">
             <div class="spinner-border spinner-border-sm me-2" aria-hidden="true"></div>
@@ -166,6 +180,80 @@
           aria-live="polite"
         >
           <span id="projects-status-text">Projects pane ready.</span>
+        </footer>
+      </div>
+
+      <div
+        class="modal fade"
+        id="projects-modal"
+        tabindex="-1"
+        aria-labelledby="projects-modal-title"
+        aria-hidden="true"
+      >
+        <div class="modal-dialog">
+          <form class="modal-content" id="projects-form">
+            <div class="modal-header">
+              <h5 class="modal-title" id="projects-modal-title">New Project</h5>
+              <button
+                type="button"
+                class="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"
+              ></button>
+            </div>
+            <div class="modal-body">
+              <input type="hidden" id="projects-form-id" value="" />
+              <div class="mb-3">
+                <label for="projects-form-stix" class="form-label">STIX incident ID</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-stix"
+                  placeholder="incident--… (optional)"
+                  autocomplete="off"
+                />
+                <div class="form-text">Optional. Leave blank to let the server assign identifiers.</div>
+              </div>
+              <div class="alert alert-danger d-none mb-0" id="projects-form-error" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-sm btn-primary" id="projects-form-submit">
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-composer"
+      role="tabpanel"
+      data-shell-pane="composer"
+    >
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
+        <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex align-items-center gap-2">
+          <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Composer</h2>
+          <span class="small text-body-secondary" id="composer-project-label">No project selected</span>
+        </div>
+        <div class="flex-grow-1 overflow-auto p-3" id="composer-main">
+          <div class="text-center py-5 text-body-secondary" id="composer-placeholder">
+            <p class="mb-1">Composer layout arrives in SPEC-011 AR1.</p>
+            <p class="small mb-0">
+              Select a project from the Projects table to load it here.
+            </p>
+          </div>
+        </div>
+        <footer
+          class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+          id="composer-status"
+          aria-live="polite"
+        >
+          <span id="composer-status-text">Composer placeholder ready.</span>
         </footer>
       </div>
     </div>
