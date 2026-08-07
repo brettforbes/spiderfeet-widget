@@ -2,9 +2,9 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1 / R11-06–R14 — Composer shell,
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / R11-06–R15 — Composer shell,
  * expand/revert, CanvasGraph viewers, left YAML iframe, stepSelected → CliScanApp,
- * unset-step gating, and option-change → YAML setYaml.
+ * unset-step gating, option-change → YAML setYaml, validation → Scan Now enable.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -18,16 +18,30 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     full: { label: 'full', leftCols: 12, centerCols: 0 },
   };
 
-  /** @type {{ instanceId: string, reload: Function, destroy: Function, setOnOptionsChange?: Function }|null} */
+  /** @type {{ instanceId: string, reload: Function, destroy: Function, setOnOptionsChange?: Function, setRunEnabled?: Function }|null} */
   Composer._cliScanApp = null;
   /** @type {string|null} */
   Composer._selectedStepId = null;
   /** @type {string|null} */
   Composer._selectedToolId = null;
+  /** Whether the mounted CliScanApp step already has a persisted run (AV2). */
+  Composer._cliScanHasRun = false;
   /** @type {ReturnType<typeof setTimeout>|null} */
   Composer._optionYamlTimer = null;
   /** Debounce for CliScanApp → setYaml (R11-14). */
   Composer.OPTION_YAML_DEBOUNCE_MS = 200;
+
+  /**
+   * R11-15 / AU2 — Scan Now enablement from editor validation only (no client guess).
+   * Completed steps stay disabled regardless of YAML validity.
+   * @param {{ ok?: boolean }|null|undefined} validation
+   * @param {boolean} hasRun
+   * @returns {boolean}
+   */
+  Composer.runEnabledFromValidation = function (validation, hasRun) {
+    if (hasRun) return false;
+    return !!(validation && validation.ok);
+  };
 
   /** Central viewer panes that support full-screen expand (R11-07) + CanvasGraph (R11-08). */
   Composer.EXPANDABLE_PANES = {
@@ -202,6 +216,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
     }
     Composer._cliScanApp = null;
+    Composer._cliScanHasRun = false;
   };
 
   /**
@@ -278,8 +293,32 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * Apply editor `validationResult` to the mounted CliScanApp Scan Now button (R11-15 / AU2).
+   * Driven solely by iframe messages forwarded as `composer-workflow:validation-result`.
+   * @param {{ ok?: boolean, diagnostics?: unknown[] }|null|undefined} validation
+   */
+  Composer.applyValidationToScanNow = function (validation) {
+    const app = Composer._cliScanApp;
+    if (!app?.setRunEnabled || !Composer._selectedToolId) return;
+
+    const enabled = Composer.runEnabledFromValidation(validation, Composer._cliScanHasRun);
+    app.setRunEnabled(enabled);
+
+    const stepLabel = Composer._selectedStepId || Composer._selectedToolId;
+    if (Composer._cliScanHasRun) {
+      Composer.setStatus(`Step ${stepLabel}: prior run — Scan Now remains disabled.`);
+      return;
+    }
+    Composer.setStatus(
+      enabled
+        ? `Step ${stepLabel}: workflow valid — Scan Now enabled.`
+        : `Step ${stepLabel}: workflow invalid — Scan Now disabled.`
+    );
+  };
+
+  /**
    * Mount CliScanApp for a resolved workflow tool step (edit-run).
-   * Unset steps (no prior run): Scan tab only, Scan Now disabled, options editable (R11-13 / AT2).
+   * Unset steps (no prior run): Scan tab only; Scan Now follows editor validation (R11-13/15).
    * Seeds options from workflow argv and pushes option edits back via setYaml (R11-14 / AU1).
    * @param {{ toolId: string, stepId: string, title?: string, hasRun?: boolean, runEnabled?: boolean, detail?: object|null }} opts
    */
@@ -299,7 +338,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     // Composer has no run store yet (AV1); default unset gating until a host passes hasRun.
     const hasRun = opts?.hasRun === true;
-    const runEnabled = opts?.runEnabled === true;
+    Composer._cliScanHasRun = hasRun;
+    // R11-15: prefer explicit opts, else last editor validationResult (never client-side guess).
+    let runEnabled;
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'runEnabled')) {
+      runEnabled = opts.runEnabled === true;
+    } else {
+      const last = Widgets.ComposerWorkflow?.getLastValidation?.() || null;
+      runEnabled = Composer.runEnabledFromValidation(last, hasRun);
+    }
     const detail = opts?.detail ?? Composer._detailFromStepArgv(stepId);
     const onOptionsChange = Composer._onCliScanOptionsChange;
 
@@ -332,6 +379,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     slot.replaceChildren();
     Composer._selectedToolId = toolId;
     Composer._selectedStepId = stepId;
+    Composer._cliScanHasRun = hasRun;
     Composer._setRightTitle(opts.title || `${toolId} · ${stepId}`);
 
     try {
@@ -350,6 +398,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     } catch (err) {
       console.error('Composer.mountCliScanApp failed', err);
       Composer._cliScanApp = null;
+      Composer._cliScanHasRun = false;
       Composer._showSlotPlaceholder(err.message || 'Failed to open CliScanApp.', {
         title: toolId,
       });
@@ -419,15 +468,19 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     // Open panel first so layout sizes CliScanApp; avoid setRightOpen(false) destroy.
     Composer._openRightPanel();
+    const lastValidation = Widgets.ComposerWorkflow?.getLastValidation?.() || null;
+    const runEnabled = Composer.runEnabledFromValidation(lastValidation, false);
     Composer.mountCliScanApp({
       toolId: info.toolId,
       stepId: classified.stepId,
       title,
       hasRun: false,
-      runEnabled: false,
+      runEnabled,
     });
     Composer.setStatus(
-      `Opened ${info.toolId} for step ${classified.stepId} (unset — Scan tab only, Scan Now disabled).`
+      runEnabled
+        ? `Opened ${info.toolId} for step ${classified.stepId} (unset — Scan Now enabled; workflow valid).`
+        : `Opened ${info.toolId} for step ${classified.stepId} (unset — Scan tab only; Scan Now disabled until editor validates).`
     );
   };
 
@@ -663,6 +716,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     });
   };
 
+  /** R11-15 / AU2 — editor validationResult messages drive Scan Now enable/disable. */
+  Composer._bindValidationResultListener = function () {
+    if (Composer._validationResultBound) return;
+    Composer._validationResultBound = true;
+    window.addEventListener('composer-workflow:validation-result', (event) => {
+      Composer.applyValidationToScanNow(event?.detail || null);
+    });
+  };
+
   Composer.initPanel = function ($root) {
     const el = $root[0];
     if (el.dataset.initialized) return;
@@ -670,6 +732,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     Composer.bindLayoutControls(el);
     Composer._bindStepSelectedListener();
+    Composer._bindValidationResultListener();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);

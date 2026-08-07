@@ -39,7 +39,7 @@ const app = window.Widgets.CliScanApp.create({
 // Later
 app.reload({ toolId: 'httpx', detail: nextDetail, mode: 'edit-run', hasRun: false, runEnabled: false });
 app.setHasRun(true);       // unlock output tabs after a run
-app.setRunEnabled(true);   // AU2: enable Scan Now when options validate
+app.setRunEnabled(true);   // AU2: enable Scan Now when editor validationResult.ok
 app.getArgvTokens();       // workflow config.argv tokens (no executable)
 app.destroy();
 ```
@@ -53,7 +53,7 @@ app.destroy();
 | `mode` | no | `view` (default) or `edit-run` |
 | `detail` | no | Examination payload: `command`, `output_text`, `structured`, `graph_proposal`, `narrative_markdown`; Composer may pass `argv` to seed from workflow YAML |
 | `hasRun` | no | When `false`, Text/Structured/Graph/Report tabs are locked (R11-13). Defaults from whether `detail` carries outputs. |
-| `runEnabled` | no | When `false` in `edit-run`, **Scan Now** stays disabled. Defaults `false` for unset (`!hasRun`) edit-run mounts. |
+| `runEnabled` | no | When `false` in `edit-run`, **Scan Now** stays disabled. Defaults `false` for unset (`!hasRun`) edit-run mounts. Composer AU2 sets this from editor `validationResult.ok` (R11-15). |
 | `onOptionsChange` | no | `edit-run` callback when options change; snapshot includes `argv` tokens for workflow `config.argv` (R11-14) |
 | `scenarioKey` | no | Status/label only |
 | `instanceId` | no | Unique when multiple instances exist |
@@ -63,17 +63,19 @@ app.destroy();
 ### Modes
 
 - **`view`** — options read-only; Scan button becomes **Scan Complete**; command preview shows captured command when present.
-- **`edit-run`** — options editable. **Scan Now** follows `runEnabled` (unset Composer steps keep it disabled until AU2 validation). When `hasRun` is false, only the Scan tab is accessible. Option edits emit `onOptionsChange` for host YAML sync.
+- **`edit-run`** — options editable. **Scan Now** follows `runEnabled` (Composer drives it from editor `validationResult`, not client-side guesses). When `hasRun` is false, only the Scan tab is accessible. Option edits emit `onOptionsChange` for host YAML sync.
 
-### Unset-step gating (R11-13 / AT2)
+### Unset-step gating (R11-13 / AT2) + validation enable (R11-15 / AU2)
 
 For a Composer step with no prior run:
 
 | Surface | Behavior |
 |---------|----------|
 | Scan tab | Accessible; option controls editable |
-| Scan Now | Disabled |
+| Scan Now | Disabled until Composer applies editor `validationResult.ok` via `setRunEnabled` |
 | Text / Structured / Graph / Report | Locked until `hasRun` is true |
+
+Composer listens for `composer-workflow:validation-result` (from the yaml-workflow-widget `validationResult` postMessage) and toggles Scan Now accordingly.
 
 ## Hosts today
 
