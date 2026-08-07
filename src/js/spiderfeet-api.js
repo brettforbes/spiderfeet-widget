@@ -43,7 +43,13 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
       payload && typeof payload === 'object' && !Array.isArray(payload)
         ? payload
         : { data: payload };
-    return Object.assign({ ok: true }, body, extra || {});
+    // Do not let HTTP `status` clobber API payload fields (e.g. execute `status: "stub"`).
+    const rest = Object.assign({}, extra || {});
+    const httpStatus = rest.status;
+    delete rest.status;
+    const out = Object.assign({ ok: true }, rest, body);
+    if (httpStatus != null) out.httpStatus = httpStatus;
+    return out;
   };
 
   SpiderfeetApi._stubEnabled = function () {
@@ -243,17 +249,124 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
 
   // —— Execute / scan steps ————————————————————————————————————
 
+  /** Default timeout for live CLI execute (AO); stubs return immediately. */
+  SpiderfeetApi.EXECUTE_TIMEOUT_MS = 300000;
+
+  /**
+   * Map a scan-step / execute payload to CliScanApp `detail` (four forms).
+   * Accepts AL3 projection field names and CliScanApp detail aliases.
+   * @param {object|null} payload
+   * @returns {object|null}
+   */
+  SpiderfeetApi.scanStepToDetail = function (payload) {
+    if (!payload || typeof payload !== 'object') return null;
+
+    const text =
+      payload.output_text != null
+        ? payload.output_text
+        : payload.text_form != null
+          ? payload.text_form
+          : null;
+    const narrative =
+      payload.narrative_markdown != null
+        ? payload.narrative_markdown
+        : payload.graph_description_markdown != null
+          ? payload.graph_description_markdown
+          : payload.markdown_narrative_form != null
+            ? payload.markdown_narrative_form
+            : null;
+    const command =
+      payload.command != null
+        ? payload.command
+        : payload.cli_command != null
+          ? payload.cli_command
+          : null;
+
+    let structured = payload.structured || null;
+    if (!structured) {
+      const raw =
+        payload.structured_form != null ? payload.structured_form : null;
+      if (raw != null && raw !== '') {
+        const format =
+          payload.scan_ui_structured_form_type ||
+          payload.structured_type ||
+          payload.structured_format ||
+          'json';
+        structured = {
+          content: typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2),
+          format: String(format).toLowerCase(),
+          filename: payload.structured_filename || `scan.${String(format).toLowerCase()}`,
+        };
+      }
+    } else if (typeof structured === 'string') {
+      structured = {
+        content: structured,
+        format: 'json',
+        filename: 'scan.json',
+      };
+    } else if (structured && structured.content == null && typeof structured === 'object') {
+      structured = {
+        content: JSON.stringify(structured, null, 2),
+        format: 'json',
+        filename: 'scan.json',
+      };
+    }
+
+    let graphProposal = payload.graph_proposal || null;
+    if (!graphProposal) {
+      const rawGraph = payload.graph_form != null ? payload.graph_form : payload.graph;
+      if (typeof rawGraph === 'string' && rawGraph.trim()) {
+        try {
+          graphProposal = JSON.parse(rawGraph);
+        } catch (_err) {
+          graphProposal = { nodes: [], edges: [], parse_error: true };
+        }
+      } else if (rawGraph && typeof rawGraph === 'object') {
+        graphProposal = rawGraph;
+      }
+    }
+    if (graphProposal && !Array.isArray(graphProposal.edges) && Array.isArray(graphProposal.links)) {
+      graphProposal = {
+        nodes: graphProposal.nodes || [],
+        edges: graphProposal.links,
+      };
+    }
+
+    const detail = {};
+    if (command != null) detail.command = command;
+    if (text != null) detail.output_text = text;
+    if (structured) detail.structured = structured;
+    if (graphProposal) detail.graph_proposal = graphProposal;
+    if (narrative != null) {
+      detail.narrative_markdown = narrative;
+      detail.graph_description_markdown = narrative;
+      detail.markdown = narrative;
+    }
+    if (payload.scan_instance_id) detail.scan_instance_id = payload.scan_instance_id;
+    if (Array.isArray(payload.argv)) detail.argv = payload.argv;
+
+    return Object.keys(detail).length ? detail : null;
+  };
+
   SpiderfeetApi.executeStep = function (workflowId, stepId, options) {
+    const opts = options && typeof options === 'object' ? { ...options } : {};
+    const timeoutMs =
+      opts.timeoutMs != null ? opts.timeoutMs : SpiderfeetApi.EXECUTE_TIMEOUT_MS;
+    delete opts.timeoutMs;
     return SpiderfeetApi.request(
       `/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/execute`,
-      { method: 'POST', body: options || {} }
+      { method: 'POST', body: opts, timeoutMs }
     );
   };
 
   SpiderfeetApi.executeWorkflow = function (workflowId, options) {
+    const opts = options && typeof options === 'object' ? { ...options } : {};
+    const timeoutMs =
+      opts.timeoutMs != null ? opts.timeoutMs : SpiderfeetApi.EXECUTE_TIMEOUT_MS;
+    delete opts.timeoutMs;
     return SpiderfeetApi.request(
       `/workflows/${encodeURIComponent(workflowId)}/execute`,
-      { method: 'POST', body: options || {} }
+      { method: 'POST', body: opts, timeoutMs }
     );
   };
 

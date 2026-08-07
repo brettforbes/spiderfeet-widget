@@ -255,6 +255,96 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * Resolve workflow id for SPEC-010 execute (project selection → YAML `id:`).
+   * @returns {string|null}
+   */
+  Composer.resolveWorkflowId = function () {
+    const selected =
+      Composer.selectedWorkflow || Composer.currentWorkflow || null;
+    if (selected && typeof selected === 'object') {
+      const fromObj = selected.workflow_id || selected.id || selected.workflowId;
+      if (fromObj) return String(fromObj).trim();
+    }
+
+    const project = Composer.selectedProject;
+    if (project && typeof project === 'object') {
+      if (project.workflow_id) return String(project.workflow_id).trim();
+      const workflows = Array.isArray(project.workflows) ? project.workflows : [];
+      for (let i = 0; i < workflows.length; i += 1) {
+        const wf = workflows[i];
+        if (typeof wf === 'string' && wf.trim()) return wf.trim();
+        if (wf && typeof wf === 'object') {
+          const id = wf.workflow_id || wf.id;
+          if (id) return String(id).trim();
+        }
+      }
+    }
+
+    const yaml = Widgets.ComposerWorkflow?.getWorkflowYaml?.() || '';
+    const match = String(yaml).match(/^\s*id:\s*['"]?([^\s'"#]+)/m);
+    if (match && match[1]) return match[1].trim();
+    return null;
+  };
+
+  /**
+   * Build CliScanApp executeContext for the selected step (R11-16 / AV1).
+   * @param {string} [stepId]
+   * @returns {{ workflowId: string, stepId: string, projectId: string|null }|null}
+   */
+  Composer.resolveExecuteContext = function (stepId) {
+    const sid = String(stepId || Composer._selectedStepId || '').trim();
+    if (!sid) return null;
+    const ownerId =
+      Widgets.ComposerWorkflow?.argvOwnerStepId?.(sid) || sid;
+    const workflowId = Composer.resolveWorkflowId();
+    if (!workflowId || !ownerId) return null;
+    const projectId = Composer.selectedProjectId
+      ? String(Composer.selectedProjectId)
+      : Composer.selectedProject?.project_id ||
+        Composer.selectedProject?.id ||
+        null;
+    return {
+      workflowId,
+      stepId: ownerId,
+      projectId: projectId ? String(projectId) : null,
+    };
+  };
+
+  /**
+   * Surface execute outcomes on Composer status (stub/errors stay visible).
+   * @param {{ ok?: boolean, kind?: string, message?: string }} outcome
+   */
+  Composer._onCliScanComplete = function (outcome) {
+    const message = outcome?.message || 'Scan finished.';
+    if (outcome?.kind === 'complete') {
+      Composer._cliScanHasRun = true;
+      if (Composer._cliScanApp?.setHasRun) {
+        Composer._cliScanApp.setHasRun(true);
+      }
+      if (Composer._cliScanApp?.setRunEnabled) {
+        Composer._cliScanApp.setRunEnabled(false);
+      }
+    }
+    Composer.setStatus(message);
+  };
+
+  /**
+   * Programmatic Scan Now (console / verification).
+   * @returns {Promise<object|null>}
+   */
+  Composer.executeSelectedStep = async function () {
+    const app = Composer._cliScanApp;
+    if (!app?.runScanNow) {
+      Composer.setStatus('No CliScanApp mounted — select a tool step first.');
+      return null;
+    }
+    if (typeof app.setExecuteContext === 'function') {
+      app.setExecuteContext(Composer.resolveExecuteContext(Composer._selectedStepId));
+    }
+    return app.runScanNow();
+  };
+
+  /**
    * Debounced CliScanApp option → editor YAML update (R11-14 / AU1).
    * @param {{ argv?: string[] }} snapshot
    */
@@ -348,7 +438,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       runEnabled = Composer.runEnabledFromValidation(last, hasRun);
     }
     const detail = opts?.detail ?? Composer._detailFromStepArgv(stepId);
+    const executeContext =
+      opts?.executeContext || Composer.resolveExecuteContext(stepId);
     const onOptionsChange = Composer._onCliScanOptionsChange;
+    const onScanComplete = Composer._onCliScanComplete;
 
     // Same tool + already mounted → reload detail only (avoid destroy storm).
     if (
@@ -366,7 +459,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           detail,
           hasRun,
           runEnabled,
+          executeContext,
           onOptionsChange,
+          onScanComplete,
         });
       } catch (err) {
         console.warn('Composer.mountCliScanApp reload failed', err);
@@ -391,7 +486,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         detail,
         hasRun,
         runEnabled,
+        executeContext,
         onOptionsChange,
+        onScanComplete,
         instanceId: 'composer-cli-scan',
         dataSource: { contentBase: '/content', corpusBase: '/cli-corpus' },
       });
