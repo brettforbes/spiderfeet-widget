@@ -373,6 +373,16 @@
                 <h3 class="h6 small text-uppercase text-body-secondary mb-0 me-auto">Temporary Subgraph Viewer</h3>
                 <button
                   type="button"
+                  class="btn btn-sm btn-outline-primary"
+                  id="composer-temp-sync"
+                  title="Send temporary graph to server (strips temporary_id; remaps to nugget_instance_id)"
+                  aria-label="Sync temporary graph to server"
+                >
+                  <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+                  <span class="ms-1">Sync</span>
+                </button>
+                <button
+                  type="button"
                   class="btn btn-sm btn-outline-secondary"
                   id="composer-temp-expand"
                   data-composer-expand="temp-subgraph"

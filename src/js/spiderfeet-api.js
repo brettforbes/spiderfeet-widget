@@ -520,22 +520,23 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
 
   // —— Contexts ————————————————————————————————————————————————
 
+  // SPEC-010 AN2 / R10-24–25 — contexts live under /contexts/{temporary|project}.
   SpiderfeetApi.getTemporaryContext = function (projectId) {
     return SpiderfeetApi.request(
-      `/projects/${encodeURIComponent(projectId)}/temporary-context`
+      `/projects/${encodeURIComponent(projectId)}/contexts/temporary`
     );
   };
 
   SpiderfeetApi.updateTemporaryContext = function (projectId, body) {
     return SpiderfeetApi.request(
-      `/projects/${encodeURIComponent(projectId)}/temporary-context`,
+      `/projects/${encodeURIComponent(projectId)}/contexts/temporary`,
       { method: 'PUT', body: body || {} }
     );
   };
 
   SpiderfeetApi.getProjectContext = function (projectId) {
     return SpiderfeetApi.request(
-      `/projects/${encodeURIComponent(projectId)}/project-context`
+      `/projects/${encodeURIComponent(projectId)}/contexts/project`
     );
   };
 })(window.Widgets.SpiderfeetApi, window.Widgets, document, window);
