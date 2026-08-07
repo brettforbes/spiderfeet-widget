@@ -98,12 +98,23 @@ When **Scan Now** is enabled and `executeContext` is set:
 
 Composer passes `executeContext` from the selected project/workflow YAML `id:` + step id. Programmatic: `Composer.executeSelectedStep()`.
 
+### Read-only replay (R11-17 / AV2)
+
+When Composer selects a step that already has a persisted `scan_step`:
+
+1. Resolves deterministic `scan_instance_id` via `SpiderfeetApi.scanInstanceIdFor(workflowId, stepId)` (SPEC-010 uuid5)
+2. Fetches `GET /scan-steps/{id}` through `SpiderfeetApi.fetchPriorScanStep`
+3. Mounts `CliScanApp` in **`view`** mode with the four forms in `detail`, `hasRun: true`
+4. All five tabs are viewable; the rail button shows **Scan Complete** (disabled)
+
+Unset steps (404 / no four forms) keep the existing `edit-run` + AU2 gating path.
+
 ## Hosts today
 
 | Host | Mount | Mode |
 |------|-------|------|
 | CLI Profiling examination detail | `#profiling-cli-scan-mount` via `profiling.js` | `view` |
-| Composer (SPEC-011) | `#composer-cliscan-slot` via `composer.js` | `edit-run` + unset gating + option → `setYaml` + execute wiring |
+| Composer (SPEC-011) | `#composer-cliscan-slot` via `composer.js` | `edit-run` (unset) or `view` (prior-run replay) + option → `setYaml` + execute wiring |
 
 Hosts must call `destroy()` before clearing the mount or creating a new instance with the same `instanceId`.
 
