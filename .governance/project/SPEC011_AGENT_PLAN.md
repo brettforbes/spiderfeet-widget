@@ -56,7 +56,7 @@ Dev loop: `npm start` serves the widget on `http://localhost:4001` (writeToDisk)
 | Embed YAML editor iframe | **AS** | Collapsing left iframe (0/3/12 cols), handshake, theme sync | AS1–AS3 |
 | Step selection → CliScanApp | **AT** | `stepSelected` → right slide-in per tool, unset-step Scan-tab-only gating | AT1–AT2 |
 | Option-edit round-trip + gating | **AU** | option change → YAML update; validation → enable Scan Now | AU1–AU2 |
-| Live execute + replay | **AV** | Scan Now → execute → four forms; read-only replay of prior runs | AV1–AV2 |
+| Live execute + replay | **AV** | Scan Now → execute → four forms; read-only replay; Run Workflow (validated YAML) | AV1–AV3 |
 | Temporary Subgraph Viewer | **AW** | temporary_id import/merge, discrete subgraphs, remove toggle, strip-on-send | AW1–AW3 |
 | Widget acceptance | **AX** | live E2E + GOV-08 exploratory review | AX1–AX2 |
 
@@ -68,7 +68,7 @@ AR1 -> AR2 -> AR3                 (after AQ2 nav/pane exists)
 AS1 -> AS2 -> AS3                 (after AR1 layout)
 AT1 -> AT2                        (after AS2 editor emits stepSelected)
 AU1 -> AU2                        (after AT + AS; needs editor round-trip)
-AV1 -> AV2                        (after AT; needs SPEC-010 AN2 execute API)
+AV1 -> AV2 -> AV3                 (after AT; needs SPEC-010 AN2/AO2 execute API)
 AW1 -> AW2 -> AW3                 (after AV1; needs completed scan graphs)
 AX1 [OPERATOR SIGN-OFF] -> AX2    (after AV + AW)
 ```
@@ -162,6 +162,10 @@ AQ (API client + Projects) and the AR/AS layout can proceed immediately against 
 ### AV2 — Read-only replay
 **Do:** Selecting an already-run step loads its stored four forms read-only (all tabs viewable, Scan Now complete/disabled) from the persisted scan_step.
 **Verify:** Re-open a completed step → four forms shown read-only.
+
+### AV3 — Run validated multi-step workflow
+**Do:** Composer toolbar **Run Workflow** enabled only when the YAML DSL iframe reports `validationResult.ok` (R11-23). On click: sync editor YAML via `updateWorkflow`/`createWorkflow`, call `executeWorkflow`, show succeeded/failed/skipped summary, import each `scan_graph` export into Temporary Subgraph Viewer. Keep per-step Scan Now unchanged.
+**Verify:** Invalid YAML keeps the button disabled; valid multi-step YAML runs AO2 end-to-end; temp viewer gains discrete imports for exporting steps; `npm run build` succeeds.
 
 ---
 
