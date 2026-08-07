@@ -2,8 +2,9 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS2 / R11-06–R11-10 — Composer shell, expand/revert,
- * CanvasGraph viewers, left YAML iframe width + handshake coordination.
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1 / R11-06–R11-12 — Composer shell, expand/revert,
+ * CanvasGraph viewers, left YAML iframe width + handshake coordination, and
+ * stepSelected → right CliScanApp slide-in.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -16,6 +17,13 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     partial: { label: 'partial', leftCols: 3, centerCols: 9 },
     full: { label: 'full', leftCols: 12, centerCols: 0 },
   };
+
+  /** @type {{ instanceId: string, reload: Function, destroy: Function }|null} */
+  Composer._cliScanApp = null;
+  /** @type {string|null} */
+  Composer._selectedStepId = null;
+  /** @type {string|null} */
+  Composer._selectedToolId = null;
 
   /** Central viewer panes that support full-screen expand (R11-07) + CanvasGraph (R11-08). */
   Composer.EXPANDABLE_PANES = {
@@ -155,8 +163,214 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         right.classList.remove('composer-right-open');
       }
     }
+    if (!open) {
+      Composer.destroyCliScanApp();
+      Composer._selectedStepId = null;
+      Composer._selectedToolId = null;
+      Composer._setRightTitle('CLI App');
+      Composer._showSlotPlaceholder('Select a workflow step to open its CLI app.');
+    }
     Composer.setStatus(open ? 'CLI app panel open.' : 'CLI app panel closed.');
   };
+
+  Composer._setRightTitle = function (title) {
+    const el = document.getElementById('composer-right-title');
+    if (el) el.textContent = title || 'CLI App';
+  };
+
+  Composer._getCliScanSlot = function () {
+    return document.getElementById('composer-cliscan-slot');
+  };
+
+  /**
+   * Destroy the mounted Composer CliScanApp instance if any.
+   */
+  Composer.destroyCliScanApp = function () {
+    if (Composer._cliScanApp?.destroy) {
+      try {
+        Composer._cliScanApp.destroy();
+      } catch (err) {
+        console.warn('Composer.destroyCliScanApp', err);
+      }
+    }
+    Composer._cliScanApp = null;
+  };
+
+  /**
+   * Empty / summary content for the right slot (no CliScanApp).
+   * @param {string} message
+   * @param {{ title?: string, detail?: string }} [options]
+   */
+  Composer._showSlotPlaceholder = function (message, options) {
+    const slot = Composer._getCliScanSlot();
+    if (!slot) return;
+    Composer.destroyCliScanApp();
+    const title = options?.title || '';
+    const detail = options?.detail || '';
+    slot.className =
+      'composer-cliscan-slot flex-grow-1 d-flex flex-column align-items-center justify-content-center text-body-secondary p-3 overflow-auto min-h-0';
+    slot.innerHTML = [
+      title ? `<p class="fw-semibold text-body mb-2 text-center">${escHtml(title)}</p>` : '',
+      `<p class="small mb-0 text-center">${escHtml(message || '')}</p>`,
+      detail ? `<p class="small text-body-secondary mt-2 mb-0 text-center">${escHtml(detail)}</p>` : '',
+    ].join('');
+  };
+
+  /**
+   * Mount CliScanApp for a resolved workflow tool step (edit-run).
+   * @param {{ toolId: string, stepId: string, title?: string }} opts
+   */
+  Composer.mountCliScanApp = function (opts) {
+    const toolId = opts?.toolId;
+    const stepId = opts?.stepId || '';
+    const slot = Composer._getCliScanSlot();
+    if (!slot || !toolId) return null;
+
+    if (!window.Widgets?.CliScanApp?.create) {
+      Composer._showSlotPlaceholder('CliScanApp component not loaded. Rebuild/restart the widget.', {
+        title: toolId,
+      });
+      Composer.setStatus('CliScanApp component not loaded.');
+      return null;
+    }
+
+    // Same tool + already mounted → reload detail only (avoid destroy storm).
+    if (
+      Composer._cliScanApp &&
+      Composer._selectedToolId === toolId &&
+      slot.querySelector('[data-cli-scan-id]')
+    ) {
+      Composer._selectedStepId = stepId;
+      Composer._setRightTitle(opts.title || `${toolId} · ${stepId}`);
+      try {
+        Composer._cliScanApp.reload({
+          toolId,
+          mode: 'edit-run',
+          scenarioKey: stepId || null,
+          detail: null,
+        });
+      } catch (err) {
+        console.warn('Composer.mountCliScanApp reload failed', err);
+      }
+      return Composer._cliScanApp;
+    }
+
+    Composer.destroyCliScanApp();
+    slot.className = 'composer-cliscan-slot flex-grow-1 d-flex flex-column min-h-0 overflow-hidden p-0';
+    slot.replaceChildren();
+    Composer._selectedToolId = toolId;
+    Composer._selectedStepId = stepId;
+    Composer._setRightTitle(opts.title || `${toolId} · ${stepId}`);
+
+    try {
+      Composer._cliScanApp = window.Widgets.CliScanApp.create({
+        container: slot,
+        toolId,
+        mode: 'edit-run',
+        scenarioKey: stepId || null,
+        detail: null,
+        instanceId: 'composer-cli-scan',
+        dataSource: { contentBase: '/content', corpusBase: '/cli-corpus' },
+      });
+    } catch (err) {
+      console.error('Composer.mountCliScanApp failed', err);
+      Composer._cliScanApp = null;
+      Composer._showSlotPlaceholder(err.message || 'Failed to open CliScanApp.', {
+        title: toolId,
+      });
+      Composer.setStatus(`CliScanApp failed — ${err.message}`);
+      return null;
+    }
+    return Composer._cliScanApp;
+  };
+
+  /**
+   * Handle yaml-workflow-widget `stepSelected` (R11-12 / AT1).
+   * @param {string} stepId
+   * @param {object} [resolved] precomputed ComposerWorkflow.resolveStepSelection result
+   */
+  Composer.handleStepSelected = function (stepId, resolved) {
+    const wf = Widgets.ComposerWorkflow;
+    const info =
+      resolved ||
+      (wf?.resolveStepSelection
+        ? wf.resolveStepSelection(stepId)
+        : { classified: { kind: 'empty', stepId: '', label: 'No step' }, openTool: false });
+
+    const classified = info.classified || { kind: 'empty', stepId: stepId || '', label: stepId || '' };
+    Composer._selectedStepId = classified.stepId || stepId || null;
+
+    if (classified.kind === 'special' || classified.kind === 'empty') {
+      Composer._selectedToolId = null;
+      Composer._showSlotPlaceholder(
+        classified.kind === 'special'
+          ? 'This diagram node is workflow chrome, not a CLI tool step. Select a step with a `uses: tool.*` binding to open CliScanApp.'
+          : 'Select a workflow step to open its CLI app.',
+        {
+          title: classified.label || classified.stepId || 'Workflow',
+          detail: classified.stepId ? `id: ${classified.stepId}` : '',
+        }
+      );
+      Composer._setRightTitle(classified.label || 'Workflow');
+      Composer._openRightPanel();
+      Composer.setStatus(
+        classified.kind === 'special'
+          ? `${classified.label} selected — no CLI tool.`
+          : 'No step selected.'
+      );
+      return;
+    }
+
+    if (!info.openTool || !info.toolId) {
+      Composer._selectedToolId = null;
+      const label = classified.label || classified.stepId;
+      Composer._showSlotPlaceholder(
+        'No `uses: tool.*` binding found for this step in the current workflow YAML.',
+        {
+          title: label,
+          detail: classified.stepId ? `id: ${classified.stepId}` : '',
+        }
+      );
+      Composer._setRightTitle(label);
+      Composer._openRightPanel();
+      Composer.setStatus(`Step ${label}: no tool binding.`);
+      return;
+    }
+
+    const title =
+      classified.kind === 'subtask'
+        ? `${info.toolId} · ${classified.subtask}`
+        : `${info.toolId} · ${classified.stepId}`;
+
+    // Open panel first so layout sizes CliScanApp; avoid setRightOpen(false) destroy.
+    Composer._openRightPanel();
+    Composer.mountCliScanApp({
+      toolId: info.toolId,
+      stepId: classified.stepId,
+      title,
+    });
+    Composer.setStatus(`Opened ${info.toolId} for step ${classified.stepId}.`);
+  };
+
+  /** Open right slide-in without clearing mount state. */
+  Composer._openRightPanel = function () {
+    Composer._rightOpen = true;
+    const workspace = document.getElementById('composer-workspace');
+    const right = document.getElementById('composer-right');
+    if (workspace) workspace.dataset.composerRightOpen = 'true';
+    if (right) {
+      right.removeAttribute('hidden');
+      right.classList.add('composer-right-open');
+    }
+  };
+
+  function escHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
   Composer._expandIconClass = 'fa-up-right-and-down-left-from-center';
   Composer._revertIconClass = 'fa-down-left-and-up-right-to-center';
@@ -360,12 +574,23 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     }
   };
 
+  Composer._bindStepSelectedListener = function () {
+    if (Composer._stepSelectedBound) return;
+    Composer._stepSelectedBound = true;
+    window.addEventListener('composer-workflow:step-selected', (event) => {
+      // Direct call from ComposerWorkflow already handled; this covers external dispatch.
+      if (event?.detail?._handledByComposer) return;
+      Composer.handleStepSelected(event?.detail?.stepId, event?.detail);
+    });
+  };
+
   Composer.initPanel = function ($root) {
     const el = $root[0];
     if (el.dataset.initialized) return;
     el.dataset.initialized = 'true';
 
     Composer.bindLayoutControls(el);
+    Composer._bindStepSelectedListener();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
@@ -374,7 +599,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       Widgets.ComposerWorkflow.initFromComposer();
     }
     Composer.setStatus(
-      'Composer layout ready — CanvasGraph + YAML iframe (handshake waits for ready).'
+      'Composer layout ready — select a YAML step to slide in CliScanApp.'
     );
   };
 

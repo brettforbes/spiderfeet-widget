@@ -2,10 +2,10 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
 /**
- * SPEC-011 AS1–AS3 / R11-09–R11-11 — Collapsing left host for yaml-workflow-widget
- * iframe + HOST_PROTOCOL handshake (ready → setTheme + setYaml; yamlChanged /
- * validationResult) + bidirectional theme sync (Widgets.Theme ↔ setTheme /
- * themeChanged).
+ * SPEC-011 AS1–AS3 / AT1 / R11-09–R11-12 — Collapsing left host for
+ * yaml-workflow-widget iframe + HOST_PROTOCOL handshake (ready → setTheme +
+ * setYaml; yamlChanged / validationResult / stepSelected) + bidirectional
+ * theme sync (Widgets.Theme ↔ setTheme / themeChanged).
  *
  * Width states (Composer.setLeftState): collapsed (0) | partial (≈3, default) | full (12).
  * - partial / collapsed: `?embed=1` (diagram-only)
@@ -135,6 +135,149 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
   ComposerWorkflow.getLastValidation = function () {
     return ComposerWorkflow._lastValidation;
+  };
+
+  /**
+   * Ask the editor to select a step node (host → iframe).
+   * @param {string} stepId
+   * @returns {boolean}
+   */
+  ComposerWorkflow.selectStep = function (stepId) {
+    if (!stepId || typeof stepId !== 'string') return false;
+    return ComposerWorkflow.postToWidget('selectStep', { stepId });
+  };
+
+  /**
+   * Lightweight parse of workflow `steps[]` for id + uses (AT1 tool resolve).
+   * Avoids a YAML dependency; enough for SpiderFeet workflow step lists.
+   * @param {string} [yaml]
+   * @returns {Array<{ id: string, uses: string|null }>}
+   */
+  ComposerWorkflow.parseWorkflowSteps = function (yaml) {
+    const steps = [];
+    const lines = String(yaml ?? '').split(/\r?\n/);
+    let inSteps = false;
+    /** @type {{ id: string, uses: string|null }|null} */
+    let current = null;
+
+    const stripScalar = (raw) =>
+      String(raw || '')
+        .trim()
+        .replace(/^['"]|['"]$/g, '');
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^steps:\s*(?:#.*)?$/.test(line)) {
+        inSteps = true;
+        continue;
+      }
+      if (inSteps && line.length && !/^\s/.test(line) && !/^#/.test(line)) {
+        break;
+      }
+      if (!inSteps) continue;
+
+      const idMatch = line.match(/^\s*-\s*id:\s*(.+?)\s*(?:#.*)?$/);
+      if (idMatch) {
+        if (current) steps.push(current);
+        current = { id: stripScalar(idMatch[1]), uses: null };
+        continue;
+      }
+      if (!current) continue;
+      const usesMatch = line.match(/^\s+uses:\s*(.+?)\s*(?:#.*)?$/);
+      if (usesMatch) {
+        current.uses = stripScalar(usesMatch[1]);
+      }
+    }
+    if (current) steps.push(current);
+    return steps;
+  };
+
+  /**
+   * Map `uses: tool.<id>` (or bare tool id) to CliScanApp toolId.
+   * @param {string|null|undefined} uses
+   * @returns {string|null}
+   */
+  ComposerWorkflow.toolIdFromUses = function (uses) {
+    if (!uses || typeof uses !== 'string') return null;
+    const trimmed = uses.trim();
+    if (!trimmed) return null;
+    const m = trimmed.match(/^tool\.(.+)$/i);
+    return m ? m[1] : trimmed;
+  };
+
+  /**
+   * Classify a diagram stepId from yaml-workflow-widget (R11-12 special ids).
+   * @param {string} stepId
+   * @returns {{
+   *   kind: 'empty'|'special'|'subtask'|'step',
+   *   stepId: string,
+   *   parentId?: string,
+   *   subtask?: string,
+   *   label: string
+   * }}
+   */
+  ComposerWorkflow.classifyStepId = function (stepId) {
+    if (!stepId || typeof stepId !== 'string') {
+      return { kind: 'empty', stepId: '', label: 'No step selected' };
+    }
+    const id = stepId.trim();
+    if (!id) {
+      return { kind: 'empty', stepId: '', label: 'No step selected' };
+    }
+    if (id.startsWith('__')) {
+      const labels = {
+        __workflow_start__: 'Workflow start',
+        __workflow_target__: 'Workflow target',
+        __workflow_end__: 'Workflow end',
+      };
+      let label = labels[id];
+      if (!label && id.startsWith('__ctxcol_')) {
+        label = 'Context collector';
+      }
+      if (!label) label = 'Workflow chrome node';
+      return { kind: 'special', stepId: id, label };
+    }
+    const sub = id.match(/^(.*)__(input|config|context|output)$/);
+    if (sub) {
+      return {
+        kind: 'subtask',
+        stepId: id,
+        parentId: sub[1],
+        subtask: sub[2],
+        label: `${sub[1]} · ${sub[2]}`,
+      };
+    }
+    return { kind: 'step', stepId: id, label: id };
+  };
+
+  /**
+   * Resolve stepSelected → tool binding from current workflow YAML.
+   * @param {string} stepId
+   * @param {string} [yaml]
+   * @returns {{
+   *   classified: ReturnType<typeof ComposerWorkflow.classifyStepId>,
+   *   step: { id: string, uses: string|null }|null,
+   *   toolId: string|null,
+   *   openTool: boolean
+   * }}
+   */
+  ComposerWorkflow.resolveStepSelection = function (stepId, yaml) {
+    const classified = ComposerWorkflow.classifyStepId(stepId);
+    if (classified.kind === 'empty' || classified.kind === 'special') {
+      return { classified, step: null, toolId: null, openTool: false };
+    }
+    const lookupId = classified.kind === 'subtask' ? classified.parentId : classified.stepId;
+    const steps = ComposerWorkflow.parseWorkflowSteps(
+      yaml != null ? yaml : ComposerWorkflow.getWorkflowYaml()
+    );
+    const step = steps.find((s) => s.id === lookupId) || null;
+    const toolId = step ? ComposerWorkflow.toolIdFromUses(step.uses) : null;
+    return {
+      classified,
+      step,
+      toolId,
+      openTool: !!(toolId && step),
+    };
   };
 
   /**
@@ -406,6 +549,24 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
           }
         }
         ComposerWorkflow._dispatch('composer-workflow:theme-changed', { theme });
+        break;
+      }
+      case 'stepSelected': {
+        // Diagram click → host right slide-in (R11-12 / AT1).
+        const stepId =
+          typeof data.payload === 'string'
+            ? data.payload
+            : data.payload?.stepId;
+        const id = typeof stepId === 'string' ? stepId : '';
+        const resolved = ComposerWorkflow.resolveStepSelection(id);
+        if (Widgets.Composer?.handleStepSelected) {
+          Widgets.Composer.handleStepSelected(id, resolved);
+        }
+        ComposerWorkflow._dispatch('composer-workflow:step-selected', {
+          stepId: id,
+          _handledByComposer: true,
+          ...resolved,
+        });
         break;
       }
       default:

@@ -903,6 +903,13 @@ body {
   min-height: 0;
 }
 
+/* AT1 — CliScanApp fills the right slide-in slot */
+.composer-cliscan-slot > .cli-scan-app {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
 /* SPEC-011 AS1 / R11-09 — yaml-workflow-widget iframe fills left column */
 .composer-yaml-slot {
   position: relative;
