@@ -137,22 +137,41 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
     return Object.assign({}, result, { projects });
   };
 
-  SpiderfeetApi.getProject = function (id) {
+  SpiderfeetApi._mutateUnavailable = function (action) {
+    return SpiderfeetApi._error(404, `${action} not available (v2 API stub)`, {
+      stub: true,
+      path: '/projects',
+    });
+  };
+
+  SpiderfeetApi.getProject = async function (id) {
+    if (SpiderfeetApi._stubEnabled()) {
+      return SpiderfeetApi._mutateUnavailable('GET /projects/:id');
+    }
     return SpiderfeetApi.request(`/projects/${encodeURIComponent(id)}`);
   };
 
-  SpiderfeetApi.createProject = function (body) {
+  SpiderfeetApi.createProject = async function (body) {
+    if (SpiderfeetApi._stubEnabled()) {
+      return SpiderfeetApi._mutateUnavailable('POST /projects');
+    }
     return SpiderfeetApi.request('/projects', { method: 'POST', body: body || {} });
   };
 
-  SpiderfeetApi.updateProject = function (id, body) {
+  SpiderfeetApi.updateProject = async function (id, body) {
+    if (SpiderfeetApi._stubEnabled()) {
+      return SpiderfeetApi._mutateUnavailable('PUT /projects/:id');
+    }
     return SpiderfeetApi.request(`/projects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: body || {},
     });
   };
 
-  SpiderfeetApi.deleteProject = function (id) {
+  SpiderfeetApi.deleteProject = async function (id) {
+    if (SpiderfeetApi._stubEnabled()) {
+      return SpiderfeetApi._mutateUnavailable('DELETE /projects/:id');
+    }
     return SpiderfeetApi.request(`/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
