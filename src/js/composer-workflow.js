@@ -2,13 +2,15 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
 /**
- * SPEC-011 AS1 / R11-09 — Collapsing left host for yaml-workflow-widget iframe.
+ * SPEC-011 AS1–AS2 / R11-09–R11-10 — Collapsing left host for yaml-workflow-widget
+ * iframe + HOST_PROTOCOL handshake (ready → setTheme + setYaml; yamlChanged /
+ * validationResult listeners).
  *
  * Width states (Composer.setLeftState): collapsed (0) | partial (≈3, default) | full (12).
  * - partial / collapsed: `?embed=1` (diagram-only)
  * - full: no embed param (YAML code + diagram)
  *
- * Handshake / setYaml / theme sync land in AS2–AS3.
+ * Theme re-sync on host toggle lands in AS3.
  */
 (function (ComposerWorkflow, Widgets, document, window) {
   'use strict';
@@ -16,11 +18,63 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   ComposerWorkflow.DEFAULT_BASE_URL = 'http://localhost:4009';
   ComposerWorkflow.FRAME_ID = 'composer-workflow-iframe';
   ComposerWorkflow.SLOT_ID = 'composer-yaml-slot';
+  ComposerWorkflow.PROTOCOL_VERSION = '1.0.0';
+
+  /**
+   * Canonical-ish default when no project workflow YAML is loaded yet.
+   * Shape matches yaml-workflow-widget `12A2_Workflow_YAML_Example.yaml`.
+   */
+  ComposerWorkflow.DEFAULT_WORKFLOW_YAML = [
+    'apiVersion: spiderfeet.workflow/v1',
+    'kind: Workflow',
+    'id: workflow--composer-default',
+    '',
+    'info:',
+    '  name: Composer default',
+    '  description: >',
+    '    Default workflow loaded into the Composer YAML editor (SPEC-011 AS2).',
+    '  author: SpiderFeet',
+    '',
+    'steps:',
+    '  - id: sfp_cli_netdiscover',
+    '    uses: tool.netdiscover',
+    '    needs: []',
+    '    input:',
+    '      type: none',
+    '    config:',
+    '      argv:',
+    '        - "-P"',
+    '        - "$step.files.output"',
+    '      files:',
+    '        output:',
+    '          mode: auto',
+    '          format: line_text',
+    '      capture:',
+    '        family: structured_native',
+    '        adapter: netdiscover',
+    '    output:',
+    '      vars: none',
+    '    context:',
+    '      export: scan_graph',
+    '',
+  ].join('\n');
 
   /** @type {HTMLIFrameElement|null} */
   ComposerWorkflow._iframe = null;
   /** @type {'collapsed'|'partial'|'full'|null} */
   ComposerWorkflow._mode = null;
+  /** @type {boolean} */
+  ComposerWorkflow._ready = false;
+  /** @type {string|null} */
+  ComposerWorkflow._protocolVersion = null;
+  /** @type {string} */
+  ComposerWorkflow._yaml = ComposerWorkflow.DEFAULT_WORKFLOW_YAML;
+  /** @type {{ ok: boolean, diagnostics?: Array }|null} */
+  ComposerWorkflow._lastValidation = null;
+  /** @type {boolean} */
+  ComposerWorkflow._listening = false;
+  /** @type {string|null} */
+  ComposerWorkflow._expectedOrigin = null;
 
   ComposerWorkflow.defaultBaseUrl = function () {
     const root = document.getElementById('widget-root');
@@ -29,6 +83,14 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
       return String(fromDom).trim().replace(/\/$/, '');
     }
     return ComposerWorkflow.DEFAULT_BASE_URL;
+  };
+
+  ComposerWorkflow._widgetOrigin = function () {
+    try {
+      return new URL(ComposerWorkflow.defaultBaseUrl()).origin;
+    } catch (_err) {
+      return null;
+    }
   };
 
   /**
@@ -47,7 +109,7 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
   /**
    * Whether state needs the embed (viz-only) URL vs full editor URL.
-   * Collapsed keeps the previous mode's document so postMessage still works (AS2).
+   * Collapsed keeps the previous mode's document so postMessage still works.
    * @param {'collapsed'|'partial'|'full'} state
    * @returns {'embed'|'full'}
    */
@@ -58,6 +120,242 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
   ComposerWorkflow.getIframe = function () {
     return ComposerWorkflow._iframe || document.getElementById(ComposerWorkflow.FRAME_ID);
+  };
+
+  ComposerWorkflow.isReady = function () {
+    return !!ComposerWorkflow._ready;
+  };
+
+  ComposerWorkflow.getWorkflowYaml = function () {
+    return ComposerWorkflow._yaml;
+  };
+
+  ComposerWorkflow.getLastValidation = function () {
+    return ComposerWorkflow._lastValidation;
+  };
+
+  /**
+   * Parse an inbound host/widget message (object or JSON string).
+   * @param {unknown} raw
+   * @returns {{ type: string, payload: *, requestId?: string, target?: string }|null}
+   */
+  ComposerWorkflow._parseMessage = function (raw) {
+    let data = raw;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch (_err) {
+        return null;
+      }
+    }
+    if (!data || typeof data !== 'object') return null;
+    const type = data.type || data.action;
+    if (!type || typeof type !== 'string') return null;
+    return {
+      type,
+      payload: data.payload !== undefined ? data.payload : data,
+      requestId: data.requestId ?? data.payload?.requestId,
+      target: data.target,
+    };
+  };
+
+  /**
+   * Post a HOST_PROTOCOL command into the yaml-workflow-widget iframe.
+   * @param {string} type
+   * @param {object|string} [payload]
+   * @param {string} [requestId]
+   * @returns {boolean}
+   */
+  ComposerWorkflow.postToWidget = function (type, payload, requestId) {
+    const iframe = ComposerWorkflow.getIframe();
+    if (!iframe?.contentWindow) return false;
+    const msg = {
+      type,
+      action: type,
+      payload: payload === undefined ? {} : payload,
+      target: 'iframe',
+    };
+    if (requestId) msg.requestId = requestId;
+    const targetOrigin = ComposerWorkflow._expectedOrigin || '*';
+    try {
+      iframe.contentWindow.postMessage(msg, targetOrigin === 'null' ? '*' : targetOrigin);
+      return true;
+    } catch (err) {
+      console.warn('ComposerWorkflow.postToWidget failed', type, err);
+      return false;
+    }
+  };
+
+  ComposerWorkflow._currentTheme = function () {
+    if (Widgets.Theme && typeof Widgets.Theme.get === 'function') {
+      const theme = Widgets.Theme.get();
+      if (theme === 'dark' || theme === 'light') return theme;
+    }
+    const root = document.getElementById('widget-root');
+    const attr = root?.getAttribute('data-bs-theme');
+    if (attr === 'dark' || attr === 'light') return attr;
+    return 'light';
+  };
+
+  /**
+   * Push current theme + YAML after `ready` (R11-10 handshake).
+   */
+  ComposerWorkflow._pushHandshake = function () {
+    if (!ComposerWorkflow._ready) return;
+    const theme = ComposerWorkflow._currentTheme();
+    ComposerWorkflow.postToWidget('setTheme', { theme });
+    ComposerWorkflow.postToWidget('setYaml', { yaml: ComposerWorkflow._yaml || '' });
+    if (Widgets.Composer?.setStatus) {
+      Widgets.Composer.setStatus('Workflow editor: theme + YAML pushed after ready.');
+    }
+  };
+
+  /**
+   * Mark the iframe as not ready (e.g. after src reload). Next `ready` re-handshakes.
+   */
+  ComposerWorkflow._markNotReady = function () {
+    ComposerWorkflow._ready = false;
+    ComposerWorkflow._protocolVersion = null;
+    ComposerWorkflow._lastValidation = null;
+    const slot = document.getElementById(ComposerWorkflow.SLOT_ID);
+    if (slot) slot.dataset.composerWorkflowReady = 'false';
+  };
+
+  /**
+   * Store workflow YAML and push via setYaml when the editor is ready.
+   * @param {string} yaml
+   * @param {{ force?: boolean }} [options]
+   */
+  ComposerWorkflow.setWorkflowYaml = function (yaml, options) {
+    const next = typeof yaml === 'string' ? yaml : '';
+    const force = !!(options && options.force);
+    if (!force && next === ComposerWorkflow._yaml && ComposerWorkflow._ready) {
+      return;
+    }
+    ComposerWorkflow._yaml = next;
+    if (ComposerWorkflow._ready) {
+      ComposerWorkflow.postToWidget('setYaml', { yaml: next });
+    }
+  };
+
+  /**
+   * Resolve YAML from Composer/project workflow objects when present.
+   * @returns {string|null}
+   */
+  ComposerWorkflow._resolveYamlFromComposer = function () {
+    const selected =
+      Widgets.Composer?.selectedWorkflow ||
+      Widgets.Composer?.currentWorkflow ||
+      null;
+    if (selected && typeof selected === 'object') {
+      const fromWf =
+        selected.workflow_yaml ||
+        selected.yaml ||
+        selected.body ||
+        null;
+      if (typeof fromWf === 'string' && fromWf.trim()) return fromWf;
+    }
+    const project = Widgets.Composer?.selectedProject;
+    if (project && typeof project === 'object') {
+      if (typeof project.workflow_yaml === 'string' && project.workflow_yaml.trim()) {
+        return project.workflow_yaml;
+      }
+      const workflows = Array.isArray(project.workflows) ? project.workflows : [];
+      for (let i = 0; i < workflows.length; i += 1) {
+        const wf = workflows[i];
+        const y = wf?.workflow_yaml || wf?.yaml;
+        if (typeof y === 'string' && y.trim()) return y;
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Refresh `_yaml` from Composer selection when available; keep default otherwise.
+   */
+  ComposerWorkflow.syncYamlFromComposer = function () {
+    const resolved = ComposerWorkflow._resolveYamlFromComposer();
+    if (resolved != null) {
+      ComposerWorkflow.setWorkflowYaml(resolved);
+    }
+  };
+
+  ComposerWorkflow._dispatch = function (name, detail) {
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail: detail || {} }));
+    } catch (_err) {
+      /* ignore */
+    }
+  };
+
+  ComposerWorkflow._handleWidgetMessage = function (event) {
+    const expected = ComposerWorkflow._expectedOrigin || ComposerWorkflow._widgetOrigin();
+    if (expected && event.origin && event.origin !== expected) {
+      return;
+    }
+
+    const data = ComposerWorkflow._parseMessage(event.data);
+    if (!data || data.target !== 'parent') return;
+
+    switch (data.type) {
+      case 'ready': {
+        ComposerWorkflow._ready = true;
+        ComposerWorkflow._protocolVersion =
+          (data.payload && data.payload.version) || ComposerWorkflow.PROTOCOL_VERSION;
+        const slot = document.getElementById(ComposerWorkflow.SLOT_ID);
+        if (slot) slot.dataset.composerWorkflowReady = 'true';
+        ComposerWorkflow.syncYamlFromComposer();
+        ComposerWorkflow._pushHandshake();
+        ComposerWorkflow._dispatch('composer-workflow:ready', {
+          version: ComposerWorkflow._protocolVersion,
+        });
+        break;
+      }
+      case 'validationResult': {
+        const ok = !!(data.payload && data.payload.ok);
+        ComposerWorkflow._lastValidation = {
+          ok,
+          diagnostics: Array.isArray(data.payload?.diagnostics)
+            ? data.payload.diagnostics
+            : [],
+        };
+        if (Widgets.Composer?.setStatus) {
+          Widgets.Composer.setStatus(
+            ok
+              ? 'Workflow YAML valid.'
+              : 'Workflow YAML invalid — see editor diagnostics.'
+          );
+        }
+        ComposerWorkflow._dispatch('composer-workflow:validation-result', {
+          ...ComposerWorkflow._lastValidation,
+        });
+        break;
+      }
+      case 'yamlChanged': {
+        const yaml =
+          typeof data.payload === 'string'
+            ? data.payload
+            : data.payload?.yaml;
+        if (typeof yaml === 'string') {
+          ComposerWorkflow._yaml = yaml;
+        }
+        ComposerWorkflow._dispatch('composer-workflow:yaml-changed', {
+          yaml: ComposerWorkflow._yaml,
+        });
+        if (Widgets.Composer?.setStatus) {
+          Widgets.Composer.setStatus('Workflow YAML updated from editor.');
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  ComposerWorkflow._ensureListening = function () {
+    if (ComposerWorkflow._listening) return;
+    ComposerWorkflow._listening = true;
+    window.addEventListener('message', ComposerWorkflow._handleWidgetMessage);
   };
 
   ComposerWorkflow._applyIframeLayout = function (iframe) {
@@ -84,6 +382,9 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
       return null;
     }
 
+    ComposerWorkflow._ensureListening();
+    ComposerWorkflow._expectedOrigin = ComposerWorkflow._widgetOrigin();
+
     const state =
       opts.state ||
       Widgets.Composer?._leftState ||
@@ -101,6 +402,7 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
       ComposerWorkflow._applyIframeLayout(iframe);
       slot.appendChild(iframe);
       ComposerWorkflow._iframe = iframe;
+      ComposerWorkflow._markNotReady();
     } else {
       ComposerWorkflow._applyIframeLayout(iframe);
       ComposerWorkflow._iframe = iframe;
@@ -116,12 +418,17 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
       (urlMode === 'embed' && !/[?&]embed=1(?:&|$)/.test(currentSrc));
 
     if (needsSrc && iframe.src !== nextSrc) {
+      ComposerWorkflow._markNotReady();
       iframe.src = nextSrc;
     }
 
     ComposerWorkflow._mode = state === 'collapsed' ? ComposerWorkflow._mode || 'partial' : state;
     slot.dataset.composerWorkflowMounted = 'true';
     slot.dataset.composerWorkflowUrlMode = urlMode;
+    slot.dataset.composerWorkflowReady = ComposerWorkflow._ready ? 'true' : 'false';
+
+    // YAML may already be on Composer from project open before mount.
+    ComposerWorkflow.syncYamlFromComposer();
 
     return iframe;
   };
@@ -133,6 +440,7 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
    */
   ComposerWorkflow.syncWidthState = function (state) {
     if (!state) return;
+    ComposerWorkflow._ensureListening();
     const iframe = ComposerWorkflow.getIframe();
     if (!iframe) {
       ComposerWorkflow.mount({ state: state === 'collapsed' ? 'partial' : state });
@@ -156,11 +464,15 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     const wantsEmbed = urlMode === 'embed';
 
     if (!currentSrc || currentSrc === 'about:blank' || isEmbed !== wantsEmbed) {
+      ComposerWorkflow._markNotReady();
       iframe.src = nextSrc;
     }
 
     ComposerWorkflow._mode = state;
-    if (slot) slot.dataset.composerWorkflowUrlMode = urlMode;
+    if (slot) {
+      slot.dataset.composerWorkflowUrlMode = urlMode;
+      slot.dataset.composerWorkflowReady = ComposerWorkflow._ready ? 'true' : 'false';
+    }
   };
 
   /**

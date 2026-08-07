@@ -544,6 +544,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Projects.persistSelectedProject(project);
     Projects.renderComposerPlaceholder(project, note || null);
 
+    // AS2 / R11-10 — push workflow_yaml into the editor when the project carries it.
+    if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+      Widgets.ComposerWorkflow.syncYamlFromComposer();
+    }
+
     if (Widgets.Shell && typeof Widgets.Shell.activateTab === 'function') {
       Widgets.Shell.activateTab('composer');
     }
@@ -602,6 +607,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     Projects.persistSelectedProject(project);
     Projects.renderComposerPlaceholder(project, note || null);
+
+    if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+      Widgets.ComposerWorkflow.syncYamlFromComposer();
+    }
   };
 
   Projects.bindToolbar = function (root) {
