@@ -23,9 +23,12 @@ const app = window.Widgets.CliScanApp.create({
   container: document.getElementById('my-mount'),
   toolId: 'nmap',
   mode: 'view', // or 'edit-run'
-  detail: scenarioDetailOrNull,
+  detail: scenarioDetailOrNull, // optional `argv: string[]` seeds the form
   hasRun: false,      // R11-13: false locks Text/Structured/Graph/Report
   runEnabled: false,  // R11-13 / AU2: false keeps Scan Now disabled in edit-run
+  onOptionsChange: (snap) => {
+    // edit-run only: { toolId, argv, values, scenarioKey }
+  },
   instanceId: 'composer-nmap-1',
   dataSource: {
     contentBase: '/content',
@@ -37,6 +40,7 @@ const app = window.Widgets.CliScanApp.create({
 app.reload({ toolId: 'httpx', detail: nextDetail, mode: 'edit-run', hasRun: false, runEnabled: false });
 app.setHasRun(true);       // unlock output tabs after a run
 app.setRunEnabled(true);   // AU2: enable Scan Now when options validate
+app.getArgvTokens();       // workflow config.argv tokens (no executable)
 app.destroy();
 ```
 
@@ -47,9 +51,10 @@ app.destroy();
 | `container` | yes | Host element; component owns its innerHTML |
 | `toolId` | yes | Loads `/content/tools/{id}/options-schema` |
 | `mode` | no | `view` (default) or `edit-run` |
-| `detail` | no | Examination payload: `command`, `output_text`, `structured`, `graph_proposal`, `narrative_markdown` |
+| `detail` | no | Examination payload: `command`, `output_text`, `structured`, `graph_proposal`, `narrative_markdown`; Composer may pass `argv` to seed from workflow YAML |
 | `hasRun` | no | When `false`, Text/Structured/Graph/Report tabs are locked (R11-13). Defaults from whether `detail` carries outputs. |
 | `runEnabled` | no | When `false` in `edit-run`, **Scan Now** stays disabled. Defaults `false` for unset (`!hasRun`) edit-run mounts. |
+| `onOptionsChange` | no | `edit-run` callback when options change; snapshot includes `argv` tokens for workflow `config.argv` (R11-14) |
 | `scenarioKey` | no | Status/label only |
 | `instanceId` | no | Unique when multiple instances exist |
 | `dataSource.contentBase` | no | Default `/content` |
@@ -58,7 +63,7 @@ app.destroy();
 ### Modes
 
 - **`view`** — options read-only; Scan button becomes **Scan Complete**; command preview shows captured command when present.
-- **`edit-run`** — options editable. **Scan Now** follows `runEnabled` (unset Composer steps keep it disabled until AU2 validation). When `hasRun` is false, only the Scan tab is accessible.
+- **`edit-run`** — options editable. **Scan Now** follows `runEnabled` (unset Composer steps keep it disabled until AU2 validation). When `hasRun` is false, only the Scan tab is accessible. Option edits emit `onOptionsChange` for host YAML sync.
 
 ### Unset-step gating (R11-13 / AT2)
 
@@ -75,7 +80,7 @@ For a Composer step with no prior run:
 | Host | Mount | Mode |
 |------|-------|------|
 | CLI Profiling examination detail | `#profiling-cli-scan-mount` via `profiling.js` | `view` |
-| Composer (SPEC-011 AT) | `#composer-cliscan-slot` via `composer.js` | `edit-run` + unset gating (`hasRun: false`, `runEnabled: false`) |
+| Composer (SPEC-011) | `#composer-cliscan-slot` via `composer.js` | `edit-run` + unset gating + option → `setYaml` argv round-trip |
 
 Hosts must call `destroy()` before clearing the mount or creating a new instance with the same `instanceId`.
 
