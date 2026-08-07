@@ -161,6 +161,8 @@ module.exports = {
                 // Viz before Composer — Composer AR3 mounts CanvasGraph at init (deferred widget.js).
                 paths.src + '/js/viz.core.js',
                 paths.src + '/js/canvas-graph.js',
+                // AS1 before Composer so deferred initPanel can mount the YAML iframe.
+                paths.src + '/js/composer-workflow.js',
                 paths.src + '/js/composer.js',
                 paths.src + '/js/shell.js',
                 paths.src + '/js/theme.js',

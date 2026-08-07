@@ -545,6 +545,21 @@ body {
   min-height: 0;
 }
 
+/* SPEC-011 AS1 / R11-09 — yaml-workflow-widget iframe (mirror custom.css) */
+.composer-yaml-slot {
+  position: relative;
+}
+
+.composer-workflow-iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: block;
+  background: transparent;
+}
+
 .composer-right {
   position: absolute;
   top: 0;

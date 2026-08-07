@@ -4,6 +4,7 @@
   id="widget-root"
   data-api-base="http://127.0.0.1:8001/api/v1"
   data-data-viewer-url="http://localhost:3000/widget"
+  data-yaml-workflow-url="http://localhost:4009"
 >
   <header class="border-bottom bg-body-tertiary">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
@@ -292,11 +293,10 @@
               </div>
             </div>
             <div
-              class="composer-yaml-slot flex-grow-1 d-flex flex-column align-items-center justify-content-center text-body-secondary p-3 overflow-hidden"
+              class="composer-yaml-slot flex-grow-1 d-flex flex-column overflow-hidden p-0"
               id="composer-yaml-slot"
-            >
-              <p class="small mb-0 text-center">YAML workflow editor (AS1)</p>
-            </div>
+              data-composer-workflow-mounted="false"
+            ></div>
           </aside>
 
           <!-- Collapsed left rail (visible when left state = collapsed) -->

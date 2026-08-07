@@ -2,7 +2,8 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / R11-06–R11-08 — Composer shell, expand/revert, CanvasGraph viewers.
+ * SPEC-011 AR1–AR3 / AS1 / R11-06–R11-09 — Composer shell, expand/revert,
+ * CanvasGraph viewers, left YAML iframe width coordination.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -127,6 +128,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     document.querySelectorAll('button[data-composer-left-state]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.composerLeftState === state);
     });
+
+    // AS1 / R11-09 — keep yaml-workflow-widget iframe mounted; sync embed vs full URL.
+    if (Widgets.ComposerWorkflow?.syncWidthState) {
+      Widgets.ComposerWorkflow.syncWidthState(state);
+    }
 
     Composer.setStatus(`Workflow column: ${cfg.label}.`);
   };
@@ -364,7 +370,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
     Composer.mountCanvasViewers();
-    Composer.setStatus('Composer layout ready — CanvasGraph viewers mounted.');
+    if (Widgets.ComposerWorkflow?.initFromComposer) {
+      Widgets.ComposerWorkflow.initFromComposer();
+    }
+    Composer.setStatus('Composer layout ready — CanvasGraph + YAML iframe mounted.');
   };
 
   Widgets.watchDOMForComponent(Composer.selectorPanel, Composer.initPanel);
