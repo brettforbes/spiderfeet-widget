@@ -2,10 +2,10 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV2 / R11-06–R17 —
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV2 / AW1 / R11-06–R18 —
  * Composer shell, expand/revert, CanvasGraph viewers, left YAML iframe,
  * stepSelected → CliScanApp, unset-step gating, option-change → YAML setYaml,
- * validation → Scan Now enable, live execute, read-only replay of prior runs.
+ * validation → Scan Now enable, live execute, read-only replay, temp-graph import.
  */
 (function ($, Composer, Widgets, document, window) {
   'use strict';
@@ -315,10 +315,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
   /**
    * Surface execute outcomes on Composer status (stub/errors stay visible).
-   * @param {{ ok?: boolean, kind?: string, message?: string }} outcome
+   * On complete + context.export scan_graph, AW1 imports into Temporary Subgraph Viewer.
+   * @param {{ ok?: boolean, kind?: string, message?: string, detail?: object }} outcome
    */
   Composer._onCliScanComplete = function (outcome) {
-    const message = outcome?.message || 'Scan finished.';
+    let message = outcome?.message || 'Scan finished.';
     if (outcome?.kind === 'complete') {
       Composer._cliScanHasRun = true;
       if (Composer._cliScanApp?.setHasRun) {
@@ -326,6 +327,19 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
       if (Composer._cliScanApp?.setRunEnabled) {
         Composer._cliScanApp.setRunEnabled(false);
+      }
+      if (Widgets.ComposerTempGraph?.handleScanComplete) {
+        try {
+          const imported = Widgets.ComposerTempGraph.handleScanComplete(outcome, {
+            stepId: Composer._selectedStepId,
+          });
+          if (imported?.subgraphId) {
+            const n = Widgets.ComposerTempGraph.getSubgraphs?.()?.length || 0;
+            message = `${message} Temporary viewer: +1 discrete subgraph (${n} total).`;
+          }
+        } catch (err) {
+          console.warn('ComposerTempGraph.handleScanComplete failed', err);
+        }
       }
     }
     Composer.setStatus(message);
