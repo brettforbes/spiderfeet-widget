@@ -871,6 +871,18 @@ body {
   min-height: 0;
 }
 
+/* SPEC-011 AR2 / R11-07 — central pane full-screen expand within the center column */
+.composer-center.composer-center-expanded .composer-viewer-expanded {
+  flex-grow: 1;
+  flex-basis: auto;
+  min-height: 0;
+  border-bottom: 0 !important;
+}
+
+.composer-center.composer-center-expanded .composer-viewer-collapsed-by-expand {
+  display: none !important;
+}
+
 .composer-viewer-stage {
   min-height: 0;
 }
