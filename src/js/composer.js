@@ -2,7 +2,7 @@ window.Widgets = window.Widgets || {};
 window.Widgets.Composer = window.Widgets.Composer || {};
 
 /**
- * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV2 / AW1 / R11-06–R18 —
+ * SPEC-011 AR1–AR3 / AS1–AS3 / AT1–AT2 / AU1–AU2 / AV1–AV2 / AW1–AW3 / R11-06–R20 —
  * Composer shell, expand/revert, CanvasGraph viewers, left YAML iframe,
  * stepSelected → CliScanApp, unset-step gating, option-change → YAML setYaml,
  * validation → Scan Now enable, live execute, read-only replay, temp-graph import.
@@ -65,7 +65,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       canvasId: 'composer-temp-subgraph-canvas',
       tooltipId: 'composer-temp-subgraph-tooltip',
       label: 'Temporary Subgraph Viewer',
-      /** AW1–AW2 temporary_id imports + discrete remove toggles. */
+      /** AW1–AW3 temporary_id imports, discrete remove, strip-on-send. */
       initialGraph: { nodes: [], links: [] },
     },
   };
