@@ -14,15 +14,19 @@
  *                                 // detail.argv (string[]) seeds the form from workflow config.argv
  *     hasRun: false,               // R11-13: false locks Text/Structured/Graph/Report
  *     runEnabled: false,           // R11-13/AU2: false keeps Scan Now disabled in edit-run
+ *     executeContext: {            // R11-16 / AV1: Scan Now → SpiderfeetApi.executeStep
+ *       workflowId, stepId, projectId?,
+ *     },
  *     onOptionsChange: (snap) => {}, // edit-run: fires when options change ({ argv, values, toolId })
+ *     onScanComplete: (result) => {}, // after execute (ok / stub / error)
  *     instanceId: 'my-scan',       // optional; unique per concurrent mount
  *     dataSource: {
  *       contentBase: '/content',   // options-schema + markdown docs
  *       corpusBase: '/cli-corpus', // unused by component today; reserved for hosts
  *     },
  *   });
- *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled, onOptionsChange });
- *   //        app.setHasRun(true); app.setRunEnabled(true); app.getArgvTokens(); app.destroy();
+ *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled, executeContext, onOptionsChange });
+ *   //        app.setHasRun(true); app.setRunEnabled(true); app.runScanNow(); app.getArgvTokens(); app.destroy();
  *
  * Host pages own chrome around the mount. Graph fullscreen toggles
  * `.profiling-graph-host-fullscreen` on `container` so any host can style it.
@@ -130,7 +134,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       detail,
       hasRun,
       runEnabled,
+      executeContext: CliScanApp._normalizeExecuteContext(config.executeContext),
       onOptionsChange: typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null,
+      onScanComplete: typeof config.onScanComplete === 'function' ? config.onScanComplete : null,
       contentBase,
       corpusBase,
       schema: null,
@@ -145,6 +151,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       priorExamTab: null,
       viewer: null,
       frameId: `data-viewer-${instanceId}`,
+      executing: false,
     };
 
     state.container = container;
@@ -162,11 +169,32 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       reload: (next) => CliScanApp.load(state, next),
       setHasRun: (next) => CliScanApp.setHasRun(state, next),
       setRunEnabled: (next) => CliScanApp.setRunEnabled(state, next),
+      setExecuteContext: (ctx) => {
+        state.executeContext = CliScanApp._normalizeExecuteContext(ctx);
+        CliScanApp._syncRunButton(state.container, state);
+      },
+      runScanNow: () => CliScanApp.runScanNow(state),
       getArgvTokens: () => CliScanApp.buildArgvTokens(state),
       setOnOptionsChange: (fn) => {
         state.onOptionsChange = typeof fn === 'function' ? fn : null;
       },
+      setOnScanComplete: (fn) => {
+        state.onScanComplete = typeof fn === 'function' ? fn : null;
+      },
       destroy: () => CliScanApp.destroy(state),
+    };
+  };
+
+  CliScanApp._normalizeExecuteContext = function (ctx) {
+    if (!ctx || typeof ctx !== 'object') return null;
+    const workflowId = String(ctx.workflowId || ctx.workflow_id || '').trim();
+    const stepId = String(ctx.stepId || ctx.step_id || '').trim();
+    if (!workflowId || !stepId) return null;
+    const projectId = String(ctx.projectId || ctx.project_id || '').trim();
+    return {
+      workflowId,
+      stepId,
+      projectId: projectId || null,
     };
   };
 
@@ -200,8 +228,14 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     if (config.mode) state.mode = config.mode === 'edit-run' ? 'edit-run' : 'view';
     state.hasRun = CliScanApp._resolveHasRun(config, state.detail);
     state.runEnabled = CliScanApp._resolveRunEnabled(config, state.mode, state.hasRun);
+    if (Object.prototype.hasOwnProperty.call(config, 'executeContext')) {
+      state.executeContext = CliScanApp._normalizeExecuteContext(config.executeContext);
+    }
     if (Object.prototype.hasOwnProperty.call(config, 'onOptionsChange')) {
       state.onOptionsChange = typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(config, 'onScanComplete')) {
+      state.onScanComplete = typeof config.onScanComplete === 'function' ? config.onScanComplete : null;
     }
 
     CliScanApp._setStatus(container, state, `Loading ${state.toolId}…`);
@@ -270,6 +304,188 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const container = state.container;
     if (!container) return;
     CliScanApp._syncRunButton(container, state);
+  };
+
+  /**
+   * Map SPEC-010 scan-step / execute payload → CliScanApp detail (R11-16).
+   * Prefers Widgets.SpiderfeetApi.scanStepToDetail when available.
+   */
+  CliScanApp.detailFromScanStep = function (payload) {
+    const api = Widgets.SpiderfeetApi;
+    if (api && typeof api.scanStepToDetail === 'function') {
+      return api.scanStepToDetail(payload);
+    }
+    return null;
+  };
+
+  /**
+   * Apply a completed run's four forms into the UI (unlock tabs + render).
+   * @param {object} state
+   * @param {object} detail
+   * @param {{ keepArgv?: boolean }} [opts]
+   */
+  CliScanApp.applyRunDetail = async function (state, detail, opts) {
+    const container = state.container;
+    if (!container || !detail) return;
+    const next = Object.assign({}, detail);
+    if (opts?.keepArgv !== false) {
+      const argv = CliScanApp.buildArgvTokens(state);
+      if (argv.length && !Array.isArray(next.argv)) next.argv = argv;
+      const preview = container.querySelector('[data-cli-scan-command]')?.textContent;
+      if (preview && !next.command) next.command = preview;
+    }
+    state.detail = next;
+    state.hasRun = true;
+    CliScanApp._syncOutputTabs(container, state);
+    CliScanApp._syncRunButton(container, state);
+    await CliScanApp._renderOutputs(container, state);
+  };
+
+  /**
+   * R11-16 / AV1 — Scan Now → SpiderfeetApi.executeStep → four forms (or stub/error message).
+   * @returns {Promise<{ ok: boolean, kind: string, message: string, detail?: object|null, result?: object }>}
+   */
+  CliScanApp.runScanNow = async function (state) {
+    const container = state.container;
+    if (!container) {
+      return { ok: false, kind: 'error', message: 'CliScanApp has no container.' };
+    }
+    if (state.executing) {
+      return { ok: false, kind: 'busy', message: 'Scan already in progress.' };
+    }
+    if (state.mode !== 'edit-run') {
+      const message = 'Scan Now is only available in edit-run mode.';
+      CliScanApp._setStatus(container, state, message);
+      return { ok: false, kind: 'error', message };
+    }
+
+    const ctx = state.executeContext;
+    if (!ctx?.workflowId || !ctx?.stepId) {
+      const message =
+        'Cannot execute: missing workflow/step context. Open a project workflow and select a step.';
+      CliScanApp._setStatus(container, state, message);
+      CliScanApp._emitScanComplete(state, { ok: false, kind: 'error', message });
+      return { ok: false, kind: 'error', message };
+    }
+
+    const api = Widgets.SpiderfeetApi;
+    if (!api || typeof api.executeStep !== 'function') {
+      const message = 'SpiderfeetApi.executeStep is not available.';
+      CliScanApp._setStatus(container, state, message);
+      CliScanApp._emitScanComplete(state, { ok: false, kind: 'error', message });
+      return { ok: false, kind: 'error', message };
+    }
+
+    state.executing = true;
+    CliScanApp._syncRunButton(container, state);
+    CliScanApp._setStatus(
+      container,
+      state,
+      `Executing ${ctx.stepId} via SpiderfeetApi…`
+    );
+
+    const body = {};
+    if (ctx.projectId) body.project_id = ctx.projectId;
+    body.step_id = ctx.stepId;
+
+    let result;
+    try {
+      result = await api.executeStep(ctx.workflowId, ctx.stepId, body);
+    } catch (err) {
+      const message = (err && err.message) || String(err);
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, `Execute failed — ${message}`);
+      const out = { ok: false, kind: 'error', message, result: null };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    if (!result || result.ok === false) {
+      const message =
+        (result && result.message) ||
+        `Execute failed (HTTP ${result?.status != null ? result.status : '?'})`;
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: false, kind: 'error', message, result };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    // AN2 stub until Epic AO — surface visibly; do not fake four forms.
+    const status = String(result.status || '').toLowerCase();
+    if (status === 'stub' || result.orchestrator === 'pending') {
+      const message =
+        result.message ||
+        'Execute accepted as stub — orchestrator pending (SPEC-010 AO). Four forms unavailable until live execute lands.';
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: true, kind: 'stub', message, result, detail: null };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    let detail = CliScanApp.detailFromScanStep(result);
+    const scanId =
+      result.scan_instance_id ||
+      result.scan_step_id ||
+      detail?.scan_instance_id ||
+      null;
+
+    // Persistence proof: re-fetch scan_step four forms when an id is returned.
+    if (scanId && typeof api.getScanStep === 'function') {
+      CliScanApp._setStatus(container, state, `Re-fetching scan step ${scanId}…`);
+      const refetched = await api.getScanStep(scanId);
+      if (refetched && refetched.ok !== false) {
+        const fromFetch = CliScanApp.detailFromScanStep(refetched);
+        if (fromFetch) detail = Object.assign({}, detail || {}, fromFetch);
+      } else if (!CliScanApp._detailHasRun(detail)) {
+        const message =
+          (refetched && refetched.message) ||
+          `Execute returned ${scanId}, but re-fetch failed.`;
+        state.executing = false;
+        CliScanApp._syncRunButton(container, state);
+        CliScanApp._setStatus(container, state, message);
+        const out = { ok: false, kind: 'error', message, result: refetched, detail };
+        CliScanApp._emitScanComplete(state, out);
+        return out;
+      }
+    }
+
+    if (!CliScanApp._detailHasRun(detail)) {
+      const message =
+        result.message ||
+        'Execute completed but returned no Text/Structured/Graph/Report forms yet.';
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: true, kind: 'empty', message, result, detail };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    await CliScanApp.applyRunDetail(state, detail);
+    state.executing = false;
+    // Keep Scan Now available for re-run only if host left runEnabled true; still show progress done.
+    CliScanApp._syncRunButton(container, state);
+    const message = scanId
+      ? `Scan complete — four forms loaded (persisted ${scanId}).`
+      : 'Scan complete — four forms loaded.';
+    CliScanApp._setStatus(container, state, message);
+    const out = { ok: true, kind: 'complete', message, result, detail };
+    CliScanApp._emitScanComplete(state, out);
+    return out;
+  };
+
+  CliScanApp._emitScanComplete = function (state, outcome) {
+    if (typeof state.onScanComplete !== 'function') return;
+    try {
+      state.onScanComplete(outcome);
+    } catch (err) {
+      console.warn('CliScanApp.onScanComplete failed', err);
+    }
   };
 
   /**
@@ -471,8 +687,13 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     runBtn.classList.remove('active');
     runBtn.removeAttribute('aria-pressed');
-    runBtn.textContent = 'Scan Now';
+    runBtn.textContent = state.executing ? 'Scanning…' : 'Scan Now';
     // R11-13 / R11-15: unset steps stay disabled until host sets runEnabled from validationResult.
+    if (state.executing) {
+      runBtn.disabled = true;
+      runBtn.title = 'Scan in progress…';
+      return;
+    }
     if (!state.runEnabled) {
       runBtn.disabled = true;
       runBtn.title = state.hasRun
@@ -481,9 +702,11 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       return;
     }
     runBtn.disabled = false;
-    runBtn.title = 'Submit the command preview for execution';
+    runBtn.title = state.executeContext
+      ? 'Run this step via SpiderfeetApi execute (SPEC-010)'
+      : 'Submit the command preview for execution';
     runBtn._cliScanRunHandler = () => {
-      CliScanApp._setStatus(container, state, 'Scan Now is not wired to live execution in this build.');
+      CliScanApp.runScanNow(state);
     };
     runBtn.addEventListener('click', runBtn._cliScanRunHandler);
   };
