@@ -60,12 +60,27 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   Projects.projectCreated = function (project) {
-    return project.created || project.created_at || project.createdAt || '';
+    return (
+      project.project_created ||
+      project.created ||
+      project.created_at ||
+      project.createdAt ||
+      ''
+    );
+  };
+
+  Projects.projectName = function (project) {
+    return project.project_name || project.name || '';
+  };
+
+  Projects.projectDescription = function (project) {
+    return project.project_description || project.description || '';
   };
 
   Projects.workflowCount = function (project) {
     if (typeof project.workflow_count === 'number') return project.workflow_count;
     if (typeof project.workflows_count === 'number') return project.workflows_count;
+    if (Array.isArray(project.workflow_ids)) return project.workflow_ids.length;
     if (Array.isArray(project.workflows)) return project.workflows.length;
     return 0;
   };
@@ -151,17 +166,24 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Projects.renderTable = function (projects) {
     const main = document.getElementById('projects-main');
     if (!main) return;
+    const showStix = projects.some((p) => !!Projects.stixIncidentId(p));
     const rows = projects
       .map((project) => {
         const id = Projects.projectId(project);
+        const name = Projects.projectName(project) || id || '—';
+        const description = Projects.projectDescription(project) || '—';
         const created = Projects.formatCreated(Projects.projectCreated(project));
         const count = Projects.workflowCount(project);
         const stix = Projects.stixIncidentId(project) || '—';
-        return `<tr class="projects-row" data-project-id="${Projects.escapeHtml(id)}" role="button" tabindex="0" title="Open in Composer">
-          <td><code class="small">${Projects.escapeHtml(id || '—')}</code></td>
-          <td class="small">${Projects.escapeHtml(created)}</td>
+        const stixCell = showStix
+          ? `<td class="small"><code class="small">${Projects.escapeHtml(stix)}</code></td>`
+          : '';
+        return `<tr class="projects-row" data-project-id="${Projects.escapeHtml(id)}" role="button" tabindex="0" title="Open in Composer (${Projects.escapeHtml(id)})">
+          <td class="small fw-semibold">${Projects.escapeHtml(name)}</td>
+          <td class="small text-body-secondary">${Projects.escapeHtml(description)}</td>
+          <td class="small text-nowrap">${Projects.escapeHtml(created)}</td>
           <td class="small text-end">${Projects.escapeHtml(String(count))}</td>
-          <td class="small"><code class="small">${Projects.escapeHtml(stix)}</code></td>
+          ${stixCell}
           <td class="text-end text-nowrap">
             <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-project-action="edit" title="Edit project">
               <i class="fa-solid fa-pen" aria-hidden="true"></i>
@@ -176,15 +198,17 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       })
       .join('');
 
+    const stixHead = showStix ? '<th scope="col">STIX incident ID</th>' : '';
     main.innerHTML = `
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0" id="projects-table">
           <thead>
             <tr>
-              <th scope="col">ID</th>
+              <th scope="col">Name</th>
+              <th scope="col">Description</th>
               <th scope="col">Created</th>
               <th scope="col" class="text-end">Workflows</th>
-              <th scope="col">STIX incident ID</th>
+              ${stixHead}
               <th scope="col" class="text-end">Actions</th>
             </tr>
           </thead>
