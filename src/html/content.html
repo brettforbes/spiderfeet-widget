@@ -203,7 +203,48 @@
               ></button>
             </div>
             <div class="modal-body">
-              <input type="hidden" id="projects-form-id" value="" />
+              <input type="hidden" id="projects-form-mode" value="create" />
+              <div class="mb-3">
+                <label for="projects-form-name" class="form-label">Name</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-name"
+                  required
+                  autocomplete="off"
+                  placeholder="Project name"
+                />
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-description" class="form-label">Description</label>
+                <textarea
+                  class="form-control form-control-sm"
+                  id="projects-form-description"
+                  rows="2"
+                  placeholder="What this project is for"
+                ></textarea>
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-id" class="form-label">Project ID</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-id"
+                  readonly
+                  tabindex="-1"
+                />
+                <div class="form-text">Generated client-side; sent to the API on create.</div>
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-created" class="form-label">Created</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-created"
+                  readonly
+                  tabindex="-1"
+                />
+              </div>
               <div class="mb-3">
                 <label for="projects-form-stix" class="form-label">STIX incident ID</label>
                 <input
@@ -213,7 +254,6 @@
                   placeholder="incident--… (optional)"
                   autocomplete="off"
                 />
-                <div class="form-text">Optional. Leave blank to let the server assign identifiers.</div>
               </div>
               <div class="alert alert-danger d-none mb-0" id="projects-form-error" role="alert"></div>
             </div>
@@ -222,7 +262,7 @@
                 Cancel
               </button>
               <button type="submit" class="btn btn-sm btn-primary" id="projects-form-submit">
-                Save
+                Create Project
               </button>
             </div>
           </form>
