@@ -337,6 +337,28 @@
           >
             <div class="composer-region-toolbar border-bottom px-2 py-1 flex-shrink-0 d-flex align-items-center gap-1">
               <span class="small text-body-secondary text-truncate me-auto">Workflow</span>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-workflow-edit-toggle"
+                title="Edit workflow"
+                aria-label="Edit workflow"
+                aria-pressed="false"
+                data-editing="false"
+              >
+                <i class="fa-solid fa-pencil" aria-hidden="true" data-edit-icon></i>
+                <span class="visually-hidden">Edit</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-workflow-settings"
+                title="Workflow settings"
+                aria-label="Workflow settings"
+              >
+                <i class="fa-solid fa-gear" aria-hidden="true"></i>
+                <span class="visually-hidden">Settings</span>
+              </button>
               <div class="btn-group btn-group-sm" role="group" aria-label="Workflow column width">
                 <button
                   type="button"
