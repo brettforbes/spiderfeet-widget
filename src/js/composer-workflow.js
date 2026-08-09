@@ -79,6 +79,9 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   ComposerWorkflow._expectedOrigin = null;
   /** @type {'light'|'dark'|null} last theme pushed to (or accepted from) the iframe */
   ComposerWorkflow._syncedTheme = null;
+  /** R13-17 — host Workflow Bar edit state (mirrored from iframe). */
+  ComposerWorkflow._editing = false;
+  ComposerWorkflow._chromeBound = false;
 
   ComposerWorkflow.defaultBaseUrl = function () {
     const root = document.getElementById('widget-root');
@@ -800,9 +803,69 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         });
         break;
       }
+      case 'editModeChanged': {
+        const editing = !!(
+          data.payload &&
+          (data.payload.editing === true ||
+            data.payload.editing === 'true' ||
+            data.payload.editMode === true)
+        );
+        ComposerWorkflow._setEditingUi(editing);
+        ComposerWorkflow._dispatch('composer-workflow:edit-mode-changed', {
+          editing,
+        });
+        break;
+      }
       default:
         break;
     }
+  };
+
+  ComposerWorkflow._setEditingUi = function (editing) {
+    ComposerWorkflow._editing = !!editing;
+    const btn = document.getElementById('composer-workflow-edit-toggle');
+    if (!btn) return;
+    btn.dataset.editing = ComposerWorkflow._editing ? 'true' : 'false';
+    btn.setAttribute('aria-pressed', ComposerWorkflow._editing ? 'true' : 'false');
+    btn.title = ComposerWorkflow._editing ? 'Exit edit mode' : 'Edit workflow';
+    btn.setAttribute(
+      'aria-label',
+      ComposerWorkflow._editing ? 'Exit edit mode' : 'Edit workflow'
+    );
+    const icon = btn.querySelector('[data-edit-icon]') || btn.querySelector('i');
+    if (icon) {
+      icon.classList.toggle('fa-pencil', !ComposerWorkflow._editing);
+      icon.classList.toggle('fa-glasses', ComposerWorkflow._editing);
+    }
+  };
+
+  ComposerWorkflow.setEditMode = function (editing) {
+    const want = !!editing;
+    ComposerWorkflow._setEditingUi(want);
+    return ComposerWorkflow.postToWidget('setEditMode', { editing: want });
+  };
+
+  ComposerWorkflow.toggleEditMode = function () {
+    return ComposerWorkflow.setEditMode(!ComposerWorkflow._editing);
+  };
+
+  ComposerWorkflow.openSettings = function () {
+    return ComposerWorkflow.postToWidget('openSettings', {});
+  };
+
+  ComposerWorkflow.bindChromeControls = function () {
+    if (ComposerWorkflow._chromeBound) return;
+    const editBtn = document.getElementById('composer-workflow-edit-toggle');
+    const settingsBtn = document.getElementById('composer-workflow-settings');
+    if (!editBtn && !settingsBtn) return;
+    ComposerWorkflow._chromeBound = true;
+    editBtn?.addEventListener('click', () => {
+      ComposerWorkflow.toggleEditMode();
+    });
+    settingsBtn?.addEventListener('click', () => {
+      ComposerWorkflow.openSettings();
+    });
+    ComposerWorkflow._setEditingUi(ComposerWorkflow._editing);
   };
 
   ComposerWorkflow._ensureListening = function () {
@@ -939,6 +1002,7 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
    * Ensure mount when Composer panel initializes (called from Composer.initPanel).
    */
   ComposerWorkflow.initFromComposer = function () {
+    ComposerWorkflow.bindChromeControls();
     ComposerWorkflow.mount({ state: Widgets.Composer?._leftState || 'partial' });
   };
 
