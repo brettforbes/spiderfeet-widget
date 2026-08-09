@@ -153,6 +153,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       </div>`;
   };
 
+  Projects.isBackendUnreachable = function (result, err) {
+    if (result && typeof result.status === 'number' && result.status === 0) return true;
+    const message = (result && result.message) || (err && err.message) || String(err || '');
+    return /networkerror|failed to fetch|load failed|network request failed|econnrefused/i.test(
+      message
+    );
+  };
+
   Projects.showError = function (message) {
     const main = document.getElementById('projects-main');
     if (!main) return;
@@ -161,6 +169,29 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         <strong>Could not load projects.</strong>
         <div class="small mt-1">${Projects.escapeHtml(message || 'Unknown error')}</div>
       </div>`;
+  };
+
+  Projects.showBackendUnreachable = function () {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="border rounded p-4 bg-body-tertiary" id="projects-unreachable" role="status">
+        <h3 class="h6 mb-2">Backend unreachable</h3>
+        <p class="small text-body-secondary mb-3 mb-md-2">
+          Is the SpiderFeet API running on <code>:8001</code>?
+          Start it from the <code>spiderfeet</code> repo with <code>./start.ps1</code>
+          (or your usual API start command), then retry.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" id="projects-retry-load">
+          Retry
+        </button>
+      </div>`;
+    const btn = document.getElementById('projects-retry-load');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        Projects.loadProjects({ forceRetry: true });
+      });
+    }
   };
 
   Projects.renderTable = function (projects) {
@@ -254,11 +285,29 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     });
   };
 
-  Projects.loadProjects = async function () {
+  Projects.loadProjects = async function (options) {
+    const opts = options || {};
     if (Projects._loading) return;
     Projects._loading = true;
     Projects.showLoading();
     Projects.setStatus('Loading projects…');
+
+    const applyFailure = (result, err) => {
+      if (Projects.isBackendUnreachable(result, err)) {
+        Projects.showBackendUnreachable();
+        Projects.setStatus('Backend unreachable — is the API running on :8001?');
+        if (!opts._autoRetried && !opts.forceRetry) {
+          window.setTimeout(() => {
+            Projects.loadProjects({ _autoRetried: true });
+          }, 1500);
+        }
+        return;
+      }
+      const message =
+        (result && result.message) || (err && err.message) || 'GET /projects failed';
+      Projects.showError(message);
+      Projects.setStatus(`Load failed: ${message}`);
+    };
 
     try {
       if (!SpiderfeetApi || typeof SpiderfeetApi.listProjects !== 'function') {
@@ -269,10 +318,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
       const result = await SpiderfeetApi.listProjects();
       if (!result || !result.ok) {
-        const message =
-          (result && result.message) || 'GET /projects failed';
-        Projects.showError(message);
-        Projects.setStatus(`Load failed: ${message}`);
+        applyFailure(result, null);
         return;
       }
 
@@ -300,9 +346,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           (result.stub ? ' (stub)' : '')
       );
     } catch (err) {
-      const message = (err && err.message) || String(err);
-      Projects.showError(message);
-      Projects.setStatus(`Load failed: ${message}`);
+      applyFailure(null, err);
     } finally {
       Projects._loading = false;
     }
