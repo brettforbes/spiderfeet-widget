@@ -411,11 +411,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * Persist current editor YAML to TypeDB so AO2 runs the validated document (R11-23).
+   * Persist current editor YAML to TypeDB so AO2 runs the validated document (R11-23 / R13-18).
+   * After PUT/create, re-fetches GET /workflows/{id} to confirm `workflow_yaml`.
    * @param {string} workflowId
    * @param {string} yaml
    * @param {string|null} projectId
-   * @returns {Promise<{ ok: boolean, created?: boolean, error?: string }>}
+   * @returns {Promise<{ ok: boolean, created?: boolean, workflow?: object, error?: string }>}
    */
   Composer.syncWorkflowYaml = async function (workflowId, yaml, projectId) {
     const api = Widgets.SpiderfeetApi;
@@ -423,6 +424,66 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       return { ok: false, error: 'SpiderfeetApi.updateWorkflow unavailable' };
     }
     const body = { workflow_yaml: yaml };
+    const want = String(yaml || '').trim();
+
+    const confirmPersisted = async () => {
+      if (!api.getWorkflow) {
+        return { ok: false, error: 'SpiderfeetApi.getWorkflow unavailable for re-fetch' };
+      }
+      let confirmed = null;
+      try {
+        confirmed = await api.getWorkflow(workflowId);
+      } catch (err) {
+        return {
+          ok: false,
+          error: `re-fetch after persist failed: ${(err && err.message) || String(err)}`,
+        };
+      }
+      if (!confirmed || confirmed.ok === false) {
+        return {
+          ok: false,
+          error:
+            confirmed?.message ||
+            confirmed?.detail ||
+            're-fetch after persist failed',
+        };
+      }
+      const persisted = String(
+        confirmed.workflow_yaml || confirmed.yaml || ''
+      ).trim();
+      // Backend stores canonical YAML (may differ whitespace/key order from editor).
+      if (!persisted) {
+        return {
+          ok: false,
+          error: 're-fetch returned empty workflow_yaml',
+          workflow: confirmed,
+        };
+      }
+      const idOf = (text) => {
+        const m = String(text).match(/^\s*id:\s*['"]?([^\s'"#]+)/m);
+        return m && m[1] ? m[1].trim() : null;
+      };
+      const wantId = idOf(want) || workflowId;
+      const gotId = idOf(persisted);
+      if (wantId && gotId && wantId !== gotId) {
+        return {
+          ok: false,
+          error: `re-fetch workflow id mismatch (${gotId} vs ${wantId})`,
+          workflow: confirmed,
+        };
+      }
+      Composer.selectedWorkflow = Object.assign(
+        {},
+        Composer.selectedWorkflow || { workflow_id: workflowId },
+        confirmed,
+        { workflow_id: confirmed.workflow_id || confirmed.id || workflowId }
+      );
+      if (Composer.selectedProject && typeof Composer.selectedProject === 'object') {
+        Composer.selectedProject.workflow_yaml = confirmed.workflow_yaml;
+      }
+      return { ok: true, workflow: confirmed };
+    };
+
     try {
       let existing = null;
       if (api.getWorkflow) {
@@ -442,7 +503,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
             error: updated.message || updated.detail || 'updateWorkflow failed',
           };
         }
-        return { ok: true, created: false };
+        const confirmed = await confirmPersisted();
+        if (!confirmed.ok) return confirmed;
+        return { ok: true, created: false, workflow: confirmed.workflow };
       }
 
       if (!projectId || !api.createWorkflow) {
@@ -463,9 +526,62 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         };
       }
       Composer.selectedWorkflow = created || { workflow_id: workflowId };
-      return { ok: true, created: true };
+      const confirmed = await confirmPersisted();
+      if (!confirmed.ok) return confirmed;
+      return { ok: true, created: true, workflow: confirmed.workflow };
     } catch (err) {
       return { ok: false, error: (err && err.message) || String(err) };
+    }
+  };
+
+  /**
+   * R13-18 — persist editor YAML when leaving edit mode (spectacles) or before Run Workflow.
+   * @param {{ reason?: string }} [options]
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  Composer.persistEditorWorkflowYaml = async function (options) {
+    const reason = (options && options.reason) || 'persist';
+    if (Composer._yamlPersistBusy) {
+      return { ok: false, error: 'persist already in progress' };
+    }
+    const yaml = Widgets.ComposerWorkflow?.getWorkflowYaml?.() || '';
+    if (!String(yaml).trim()) {
+      Composer.setStatus(`Workflow YAML ${reason}: editor YAML is empty.`);
+      return { ok: false, error: 'empty yaml' };
+    }
+    const workflowId = Composer.resolveWorkflowId();
+    if (!workflowId) {
+      Composer.setStatus(
+        `Workflow YAML ${reason}: cannot resolve workflow id.`
+      );
+      return { ok: false, error: 'no workflow id' };
+    }
+    const projectId = Composer.resolveProjectId
+      ? Composer.resolveProjectId()
+      : Composer.selectedProjectId
+        ? String(Composer.selectedProjectId)
+        : null;
+
+    Composer._yamlPersistBusy = true;
+    Composer.setStatus(`Persisting workflow YAML for ${workflowId}…`);
+    try {
+      const sync = await Composer.syncWorkflowYaml(workflowId, yaml, projectId);
+      if (!sync.ok) {
+        Composer.setStatus(
+          `Workflow YAML ${reason} failed — ${sync.error || 'unknown'}`
+        );
+        return sync;
+      }
+      const stepHint =
+        Array.isArray(sync.workflow?.steps) && sync.workflow.steps.length
+          ? ` · ${sync.workflow.steps.length} materialized step(s)`
+          : '';
+      Composer.setStatus(
+        `Workflow YAML ${reason} confirmed for ${workflowId}${stepHint}.`
+      );
+      return sync;
+    } finally {
+      Composer._yamlPersistBusy = false;
     }
   };
 
@@ -561,7 +677,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.setStatus(`Syncing workflow YAML for ${workflowId}…`);
 
     try {
-      const sync = await Composer.syncWorkflowYaml(workflowId, yaml, projectId);
+      const sync = await Composer.persistEditorWorkflowYaml({
+        reason: 'Run Workflow',
+      });
       if (!sync.ok) {
         Composer.setStatus(`Run Workflow: YAML sync failed — ${sync.error || 'unknown'}`);
         return null;
@@ -1183,6 +1301,23 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     });
   };
 
+  /** R13-18 — leaving edit mode (spectacles) persists editor YAML via PUT + re-fetch. */
+  Composer._bindEditModePersistListener = function () {
+    if (Composer._editModePersistBound) return;
+    Composer._editModePersistBound = true;
+    Composer._editSessionActive = false;
+    window.addEventListener('composer-workflow:edit-mode-changed', (event) => {
+      const editing = !!event?.detail?.editing;
+      if (editing) {
+        Composer._editSessionActive = true;
+        return;
+      }
+      if (!Composer._editSessionActive) return;
+      Composer._editSessionActive = false;
+      Composer.persistEditorWorkflowYaml({ reason: 'edit-exit' });
+    });
+  };
+
   Composer.initPanel = function ($root) {
     const el = $root[0];
     if (el.dataset.initialized) return;
@@ -1191,6 +1326,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.bindLayoutControls(el);
     Composer._bindStepSelectedListener();
     Composer._bindValidationResultListener();
+    Composer._bindEditModePersistListener();
     Composer._bindRunWorkflowButton();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);

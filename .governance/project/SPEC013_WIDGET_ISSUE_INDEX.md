@@ -19,8 +19,8 @@ Status legend: `planned` → `open` → `in progress` → `in review` → `done`
 | W3-4 — Double-click row → open in Composer via `/complete` | [#214](https://github.com/brettforbes/spiderfeet-widget/issues/214) | R13-15 | B2-3 | open |
 | Epic W4 — Composer dropdown + Workflow Bar controls | [#207](https://github.com/brettforbes/spiderfeet-widget/issues/207) | R13-16..18 | W3, Y1, B2 | open |
 | W4-1 — Composer top-bar project dropdown + "Add new project" checkbox | [#215](https://github.com/brettforbes/spiderfeet-widget/issues/215) | R13-16 | W3-3, B2-3 | open |
-| W4-2 — Workflow Bar pencil↔spectacles (edit) + gear (settings) wired to iFrame | [#216](https://github.com/brettforbes/spiderfeet-widget/issues/216) | R13-17 | Y1 (R13-21) | open |
-| W4-3 — Persist editor YAML on edit-exit + Run Workflow (`PUT /workflows/{id}`) | [#217](https://github.com/brettforbes/spiderfeet-widget/issues/217) | R13-18 | B2-2, W4-2 | open |
+| W4-2 — Workflow Bar pencil↔spectacles (edit) + gear (settings) wired to iFrame | [#216](https://github.com/brettforbes/spiderfeet-widget/issues/216) | R13-17 | Y1 (R13-21) | done ([#227](https://github.com/brettforbes/spiderfeet-widget/pull/227)) |
+| W4-3 — Persist editor YAML on edit-exit + Run Workflow (`PUT /workflows/{id}`) | [#217](https://github.com/brettforbes/spiderfeet-widget/issues/217) | R13-18 | B2-2, W4-2 | done |
 | Epic W5 — Widget acceptance | [#208](https://github.com/brettforbes/spiderfeet-widget/issues/208) | R13-19 | W3, W4 | open |
 | W5-1 — GOV-08 exploratory review (OPERATOR GATE) | [#218](https://github.com/brettforbes/spiderfeet-widget/issues/218) | R13-19 | all above | open |
 
