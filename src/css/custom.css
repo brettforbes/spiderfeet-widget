@@ -430,6 +430,15 @@ body {
   cursor: not-allowed;
 }
 
+/* Beat `.tab-content > .tab-pane.active.show { overflow: hidden }` so
+   Text / Report can scroll their long content inside CliScanApp. */
+.cli-scan-tab-content > .tab-pane.cli-scan-pane-scroll.active.show {
+  display: block !important;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto !important;
+}
+
 .cli-scan-pane-scroll {
   overflow: auto;
   max-height: 100%;
@@ -951,6 +960,28 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+}
+
+/* Composer slide-in: options fill cols 4–10; rail ≈2 cols; vertical scroll for options */
+.cli-scan-app--composer .cli-scan-scan-layout--composer {
+  flex-wrap: nowrap;
+}
+
+.cli-scan-app--composer .cli-scan-form-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.cli-scan-app--composer .cli-scan-rail {
+  flex: 0 0 10.5rem;
+  width: 10.5rem;
+  max-width: 12rem;
+}
+
+.cli-scan-app--composer .cli-opt-section-cols-3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 /* SPEC-011 AS1 / R11-09 — yaml-workflow-widget iframe fills left column */

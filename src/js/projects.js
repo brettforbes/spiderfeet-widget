@@ -597,8 +597,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     }
   };
 
-  Projects.persistSelectedProject = function (project) {
+  /**
+   * Persist Composer project selection (session + optional URL).
+   * @param {object|null} project
+   * @param {{ activateComposerTab?: boolean }} [options]
+   *   When true (e.g. double-click open), URL tab becomes composer.
+   *   Cold restore must NOT force tab=composer — Projects is the default landing tab.
+   */
+  Projects.persistSelectedProject = function (project, options) {
     const id = Projects.projectId(project);
+    const activateComposerTab = !!(options && options.activateComposerTab);
     Composer.selectedProjectId = id || null;
     Composer.selectedProject = project || null;
     try {
@@ -616,13 +624,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     try {
       const url = new URL(window.location.href);
       if (id) {
-        url.searchParams.set('tab', 'composer');
         url.searchParams.set('project', id);
       } else {
         url.searchParams.delete('project');
       }
+      if (activateComposerTab) {
+        url.searchParams.set('tab', 'composer');
+      }
+      const tab = url.searchParams.get('tab') || 'projects';
       history.replaceState(
-        { tab: 'composer', projectId: id || null },
+        { tab, projectId: id || null },
         '',
         url.toString()
       );
@@ -801,8 +812,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       note = (err && err.message) || String(err);
     }
 
-    Projects.persistSelectedProject(project);
+    // Latest Composer open becomes the session default + landing URL for this navigation.
+    Projects.persistSelectedProject(project, { activateComposerTab: true });
     Projects.renderComposerPlaceholder(project, note || null);
+    Projects.refreshComposerProjectMenu();
 
     if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
       Widgets.ComposerWorkflow.syncYamlFromComposer();
@@ -821,6 +834,24 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Projects._busy = false;
   };
 
+  /**
+   * First project in the Projects table (stable list order), or null if empty.
+   * @returns {string|null}
+   */
+  Projects.firstProjectId = function () {
+    const list = Object.values(Projects._projectsById || {});
+    if (!list.length) return null;
+    // Prefer table row order when present.
+    const tbody = document.querySelector('#projects-table tbody');
+    if (tbody) {
+      const row = tbody.querySelector('tr[data-project-id]');
+      const id = row?.getAttribute('data-project-id');
+      if (id) return id;
+    }
+    const first = list[0];
+    return Projects.projectId(first) || null;
+  };
+
   Projects.restoreComposerFromStorage = async function () {
     let projectId = null;
     try {
@@ -836,8 +867,29 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         projectId = null;
       }
     }
+    // No prior session default → load first Projects-table row.
     if (!projectId) {
+      if (!Object.keys(Projects._projectsById || {}).length) {
+        try {
+          await Projects.loadProjects();
+        } catch (_err) {
+          /* ignore */
+        }
+      }
+      projectId = Projects.firstProjectId();
+    }
+    if (!projectId) {
+      // Empty table: clear composer YAML / selection.
+      Projects.persistSelectedProject(null);
       Projects.renderComposerPlaceholder(null);
+      if (Widgets.Composer) {
+        Widgets.Composer.selectedWorkflow = null;
+      }
+      if (Widgets.ComposerWorkflow?.setWorkflowYaml) {
+        Widgets.ComposerWorkflow.setWorkflowYaml('');
+      } else if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+        Widgets.ComposerWorkflow.syncYamlFromComposer();
+      }
       return;
     }
 
@@ -881,6 +933,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     Projects.persistSelectedProject(project);
     Projects.renderComposerPlaceholder(project, note || null);
+    Projects.refreshComposerProjectMenu();
 
     if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
       Widgets.ComposerWorkflow.syncYamlFromComposer();
@@ -925,23 +978,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
     });
 
-    const pane = document.getElementById('pane-projects');
-    if (pane && pane.classList.contains('active') && !pane.classList.contains('d-none')) {
-      Projects.loadProjects();
-    }
-
-    try {
-      const url = new URL(window.location.href);
-      if (url.searchParams.get('tab') === 'composer') {
-        Projects.restoreComposerFromStorage().then(() => {
-          if (Widgets.Shell && typeof Widgets.Shell.activateTab === 'function') {
-            Widgets.Shell.activateTab('composer');
-          }
-        });
-      }
-    } catch (_err) {
-      /* ignore */
-    }
+    // Default landing tab is Projects — load the table. Session project id is
+    // kept for Composer, but we no longer auto-switch to Composer on refresh.
+    Projects.loadProjects();
   };
 
   Widgets.watchDOMForComponent(Projects.selectorPanel, Projects.initPanel);

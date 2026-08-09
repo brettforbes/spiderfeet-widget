@@ -175,7 +175,16 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         inSteps = true;
         continue;
       }
-      if (inSteps && line.length && !/^\s/.test(line) && !/^#/.test(line)) {
+      // Leave steps on the next top-level mapping key. Do NOT treat column-0
+      // sequence items (`- id: …`) as leaving — TypeDB-stored / dump-style YAML
+      // often writes the steps list unindented under `steps:`.
+      if (
+        inSteps &&
+        line.length &&
+        !/^\s/.test(line) &&
+        !/^#/.test(line) &&
+        !/^-/.test(line)
+      ) {
         break;
       }
       if (!inSteps) continue;
@@ -187,7 +196,8 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         continue;
       }
       if (!current) continue;
-      const usesMatch = line.match(/^\s+uses:\s*(.+?)\s*(?:#.*)?$/);
+      // `uses` may be indented under the step or (rarely) flush left after `- id`.
+      const usesMatch = line.match(/^\s*uses:\s*(.+?)\s*(?:#.*)?$/);
       if (usesMatch) {
         current.uses = stripScalar(usesMatch[1]);
       }
@@ -265,7 +275,12 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
    *   openTool: boolean
    * }}
    */
-  ComposerWorkflow.resolveStepSelection = function (stepId, yaml) {
+  /**
+   * @param {string} stepId
+   * @param {string} [yaml]
+   * @param {{ uses?: string|null, toolId?: string|null }} [hints] from diagram node when host YAML parse lags
+   */
+  ComposerWorkflow.resolveStepSelection = function (stepId, yaml, hints) {
     const classified = ComposerWorkflow.classifyStepId(stepId);
     if (classified.kind === 'empty' || classified.kind === 'special') {
       return { classified, step: null, toolId: null, openTool: false };
@@ -274,8 +289,27 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     const steps = ComposerWorkflow.parseWorkflowSteps(
       yaml != null ? yaml : ComposerWorkflow.getWorkflowYaml()
     );
-    const step = steps.find((s) => s.id === lookupId) || null;
-    const toolId = step ? ComposerWorkflow.toolIdFromUses(step.uses) : null;
+    let step = steps.find((s) => s.id === lookupId) || null;
+    let toolId = step ? ComposerWorkflow.toolIdFromUses(step.uses) : null;
+    // Diagram node already carries uses — prefer when YAML parse missed the step.
+    if (!toolId && hints) {
+      const fromHint =
+        ComposerWorkflow.toolIdFromUses(hints.uses) ||
+        (typeof hints.toolId === 'string' && hints.toolId.trim()
+          ? hints.toolId.trim()
+          : null);
+      if (fromHint) {
+        toolId = fromHint;
+        if (!step) {
+          step = {
+            id: lookupId,
+            uses: hints.uses || `tool.${fromHint}`,
+          };
+        } else if (!step.uses && hints.uses) {
+          step = Object.assign({}, step, { uses: hints.uses });
+        }
+      }
+    }
     return {
       classified,
       step,
@@ -360,7 +394,14 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         inStep = false;
         continue;
       }
-      if (inSteps && line.length && !/^\s/.test(line) && !/^#/.test(line)) {
+      // Allow column-0 `- id:` list items (TypeDB dump style).
+      if (
+        inSteps &&
+        line.length &&
+        !/^\s/.test(line) &&
+        !/^#/.test(line) &&
+        !/^-/.test(line)
+      ) {
         break;
       }
       if (!inSteps) continue;
@@ -380,37 +421,44 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         break;
       }
 
-      const argvMatch = line.match(/^(\s+)argv:\s*(?:#.*)?$/);
+      const argvMatch = line.match(/^(\s*)argv:\s*(?:#.*)?$/);
       if (argvMatch) {
         argvLineIndex = i;
-        argvIndent = argvMatch[1];
+        argvIndent = argvMatch[1] || '';
         break;
       }
     }
 
     if (argvLineIndex < 0) return null;
 
-    const itemIndent = `${argvIndent}  `;
     const listStart = argvLineIndex + 1;
     let listEnd = listStart;
     const argv = [];
+    // Workflow YAML often uses same-indent sequences:
+    //   argv:
+    //   - -dL
+    // not the nested form `argv:\n      - -dL`.
+    let itemIndent = `${argvIndent}  `;
 
     for (let j = listStart; j < lines.length; j += 1) {
       const line = lines[j];
       if (!line.trim() || /^\s*#/.test(line)) {
-        // blank/comment inside list — keep scanning only if still indented under argv
-        if (line.length && !line.startsWith(itemIndent) && line.trim()) break;
         listEnd = j + 1;
         continue;
       }
-      if (!line.startsWith(itemIndent) && line.trim()) {
-        // Dedent to argv key level or less → end of list
-        break;
+      const itemMatch = line.match(/^(\s*)-\s+(.+?)\s*(?:#.*)?$/);
+      if (itemMatch) {
+        const ind = itemMatch[1] || '';
+        if (ind.length < argvIndent.length) break;
+        if (argv.length === 0) itemIndent = ind;
+        argv.push(ComposerWorkflow._unquoteYamlScalar(itemMatch[2]));
+        listEnd = j + 1;
+        continue;
       }
-      const itemMatch = line.match(/^\s*-\s+(.+?)\s*(?:#.*)?$/);
-      if (!itemMatch) break;
-      argv.push(ComposerWorkflow._unquoteYamlScalar(itemMatch[1]));
-      listEnd = j + 1;
+      // Sibling key under config (e.g. `files:`) — end of argv list.
+      const keyIndent = (line.match(/^(\s*)\S/) || [])[1];
+      if (keyIndent != null && keyIndent.length <= argvIndent.length) break;
+      break;
     }
 
     return {
@@ -438,33 +486,98 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   };
 
   /**
-   * Merge CliScanApp argv tokens with prior `$…` workflow placeholders.
-   * Placeholders already present in newTokens are kept; missing ones are
-   * re-inserted after their previous neighbour when possible.
+   * Merge CliScanApp argv tokens with prior workflow argv.
+   * - Prefer prior token order so Scan edits do not reshuffle YAML argv.
+   * - Re-insert missing `$…` placeholders after their previous neighbour.
    * @param {string[]} oldArgv
    * @param {string[]} newTokens
    * @returns {string[]}
    */
   ComposerWorkflow.mergeArgvPreservingPlaceholders = function (oldArgv, newTokens) {
-    const result = Array.isArray(newTokens) ? newTokens.map(String) : [];
-    const present = new Set(result);
-    const prior = Array.isArray(oldArgv) ? oldArgv : [];
+    const incoming = Array.isArray(newTokens) ? newTokens.map(String) : [];
+    const prior = Array.isArray(oldArgv) ? oldArgv.map(String) : [];
+    if (!prior.length) return incoming;
+
+    const incomingSet = new Set(incoming);
+    const result = [];
+    const used = new Set();
+
+    const takeValue = (flagIdxInIncoming) => {
+      const next = incoming[flagIdxInIncoming + 1];
+      if (next == null) return null;
+      if (next.startsWith('-') && !next.startsWith('-$') && next.length > 1) return null;
+      return next;
+    };
+
     prior.forEach((tok, idx) => {
-      const t = String(tok);
-      if (!t.startsWith('$')) return;
-      if (present.has(t)) return;
-      const prev = idx > 0 ? String(prior[idx - 1]) : null;
+      if (used.has(tok) && !tok.startsWith('$')) return;
+      if (tok.startsWith('-') && !tok.startsWith('-$')) {
+        if (!incomingSet.has(tok)) return;
+        result.push(tok);
+        used.add(tok);
+        const oldNext = idx + 1 < prior.length ? prior[idx + 1] : null;
+        const incIdx = incoming.indexOf(tok);
+        const newVal = incIdx >= 0 ? takeValue(incIdx) : null;
+        if (newVal != null) {
+          result.push(newVal);
+          used.add(newVal);
+        } else if (
+          oldNext &&
+          oldNext.startsWith('$') &&
+          incomingSet.has(oldNext)
+        ) {
+          result.push(oldNext);
+          used.add(oldNext);
+        }
+        return;
+      }
+      if (tok.startsWith('$')) {
+        if (incomingSet.has(tok) && !used.has(tok)) {
+          result.push(tok);
+          used.add(tok);
+        }
+        return;
+      }
+      if (incomingSet.has(tok) && !used.has(tok)) {
+        result.push(tok);
+        used.add(tok);
+      }
+    });
+
+    incoming.forEach((tok, idx) => {
+      if (used.has(tok)) return;
+      if (tok.startsWith('-') && !tok.startsWith('-$')) {
+        result.push(tok);
+        used.add(tok);
+        const val = takeValue(idx);
+        if (val != null && !used.has(val)) {
+          result.push(val);
+          used.add(val);
+        }
+        return;
+      }
+      if (!tok.startsWith('$')) {
+        result.push(tok);
+        used.add(tok);
+      }
+    });
+
+    // Final placeholder rescue for any `$…` dropped above.
+    prior.forEach((tok, idx) => {
+      if (!tok.startsWith('$') || used.has(tok) || !incomingSet.has(tok)) return;
+      const prev = idx > 0 ? prior[idx - 1] : null;
       if (prev != null) {
         const prevIdx = result.lastIndexOf(prev);
         if (prevIdx >= 0) {
-          result.splice(prevIdx + 1, 0, t);
-          present.add(t);
+          result.splice(prevIdx + 1, 0, tok);
+          used.add(tok);
           return;
         }
       }
-      result.push(t);
-      present.add(t);
+      result.push(tok);
+      used.add(tok);
     });
+
     return result;
   };
 
@@ -626,6 +739,13 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     if (!ComposerWorkflow._ready) return;
     ComposerWorkflow.pushTheme(ComposerWorkflow._currentTheme(), { force: true });
     ComposerWorkflow.postToWidget('setYaml', { yaml: ComposerWorkflow._yaml || '' });
+    const leftState =
+      ComposerWorkflow._mode || Widgets.Composer?._leftState || 'partial';
+    if (leftState === 'full') {
+      ComposerWorkflow.setLayoutMode('fullscreen');
+    } else {
+      ComposerWorkflow.setLayoutMode('default');
+    }
     if (Widgets.Composer?.setStatus) {
       Widgets.Composer.setStatus('Workflow editor: theme + YAML pushed after ready.');
     }
@@ -698,6 +818,11 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     const resolved = ComposerWorkflow._resolveYamlFromComposer();
     if (resolved != null) {
       ComposerWorkflow.setWorkflowYaml(resolved);
+      return;
+    }
+    // No project / empty table → empty diagram (no default sample YAML).
+    if (!Widgets.Composer?.selectedProject && !Widgets.Composer?.selectedProjectId) {
+      ComposerWorkflow.setWorkflowYaml('', { force: true });
     }
   };
 
@@ -816,6 +941,26 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
         });
         break;
       }
+      case 'openCliUi': {
+        const payload =
+          typeof data.payload === 'string'
+            ? { stepId: data.payload }
+            : data.payload || {};
+        const id = typeof payload.stepId === 'string' ? payload.stepId : '';
+        if (id && Widgets.Composer?.handleStepSelected) {
+          const resolved = ComposerWorkflow.resolveStepSelection(id, null, {
+            uses: payload.uses || null,
+            toolId: payload.toolId || null,
+          });
+          Widgets.Composer.handleStepSelected(id, resolved);
+        }
+        ComposerWorkflow._dispatch('composer-workflow:open-cli-ui', {
+          stepId: id,
+          uses: payload.uses || null,
+          toolId: payload.toolId || null,
+        });
+        break;
+      }
       default:
         break;
     }
@@ -853,17 +998,31 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     return ComposerWorkflow.postToWidget('openSettings', {});
   };
 
+  ComposerWorkflow.resetView = function () {
+    return ComposerWorkflow.postToWidget('resetView', {});
+  };
+
+  ComposerWorkflow.setLayoutMode = function (mode) {
+    return ComposerWorkflow.postToWidget('setLayoutMode', {
+      mode: mode || 'default',
+    });
+  };
+
   ComposerWorkflow.bindChromeControls = function () {
     if (ComposerWorkflow._chromeBound) return;
     const editBtn = document.getElementById('composer-workflow-edit-toggle');
     const settingsBtn = document.getElementById('composer-workflow-settings');
-    if (!editBtn && !settingsBtn) return;
+    const resetBtn = document.getElementById('composer-workflow-reset-view');
+    if (!editBtn && !settingsBtn && !resetBtn) return;
     ComposerWorkflow._chromeBound = true;
     editBtn?.addEventListener('click', () => {
       ComposerWorkflow.toggleEditMode();
     });
     settingsBtn?.addEventListener('click', () => {
       ComposerWorkflow.openSettings();
+    });
+    resetBtn?.addEventListener('click', () => {
+      ComposerWorkflow.resetView();
     });
     ComposerWorkflow._setEditingUi(ComposerWorkflow._editing);
   };
@@ -995,6 +1154,16 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     if (slot) {
       slot.dataset.composerWorkflowUrlMode = urlMode;
       slot.dataset.composerWorkflowReady = ComposerWorkflow._ready ? 'true' : 'false';
+    }
+
+    // After URL settle / if already ready, push layout: full = 50/50 code + 100% diagram.
+    if (ComposerWorkflow._ready) {
+      if (state === 'full') {
+        ComposerWorkflow.setLayoutMode('fullscreen');
+      } else {
+        ComposerWorkflow.setLayoutMode('default');
+        ComposerWorkflow.resetView();
+      }
     }
   };
 
