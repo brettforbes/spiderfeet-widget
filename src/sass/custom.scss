@@ -39,6 +39,31 @@ body {
   max-width: 14rem;
 }
 
+/* R13-11 — navbar auto-hide (slide up; top-edge / keyboard reveal) */
+#widget-root > .app-header {
+  position: relative;
+  z-index: 1030;
+  flex-shrink: 0;
+  transition: transform 0.25s ease, margin-top 0.25s ease;
+  will-change: transform;
+}
+
+#widget-root.app-header-hidden > .app-header {
+  transform: translateY(-100%);
+  margin-top: calc(-1 * var(--app-header-height, 3rem));
+  pointer-events: none;
+}
+
+#widget-root.app-header-hidden > .app-header:focus-within {
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #widget-root > .app-header {
+    transition: none;
+  }
+}
+
 .profiling-click-row {
   cursor: pointer;
 }
