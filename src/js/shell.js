@@ -7,7 +7,7 @@ window.Widgets.Shell = window.Widgets.Shell || {};
   Shell.selector = '#widget-root';
 
   const HIDE_IDLE_MS = 3000;
-  const TOP_EDGE_PX = 48;
+  const TOP_EDGE_PX = 24;
 
   let hideTimer = null;
   let rootEl = null;
@@ -135,6 +135,33 @@ window.Widgets.Shell = window.Widgets.Shell || {};
     });
 
     bindAutoHide(el);
+
+    // Cold start / hard refresh: default tab is Projects.
+    // Stale ?tab=composer from a prior Composer open must not steal the landing tab
+    // (that left the navbar visible and skipped the Projects → Composer hide cycle).
+    let landingTab = 'projects';
+    try {
+      const url = new URL(window.location.href);
+      const requested = url.searchParams.get('tab');
+      if (requested && requested !== 'composer') {
+        landingTab = requested;
+      } else {
+        url.searchParams.set('tab', 'projects');
+        history.replaceState(
+          { tab: 'projects', projectId: url.searchParams.get('project') },
+          '',
+          url.toString()
+        );
+        landingTab = 'projects';
+      }
+    } catch (_err) {
+      landingTab = 'projects';
+    }
+    Shell.activateTab(landingTab);
+    // Re-arm auto-hide after landing (R13-11).
+    window.setTimeout(() => {
+      showHeader();
+    }, 0);
   };
 
   Widgets.watchDOMForComponent(Shell.selector, Shell.init);

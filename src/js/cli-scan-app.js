@@ -155,7 +155,18 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     };
 
     state.container = container;
+    state.modalEl = null;
+    state.layout =
+      config.layout ||
+      (container.closest?.('.composer-cliscan-slot') || container.classList?.contains('composer-cliscan-slot')
+        ? 'composer'
+        : 'default');
     container.innerHTML = CliScanApp._shellHtml(state);
+    if (state.layout === 'composer') {
+      container.querySelector('.cli-scan-app')?.classList.add('cli-scan-app--composer');
+    }
+    // Park doc modals on body immediately (Composer transform/overflow stacking).
+    CliScanApp._ensureModalOnBody(container, state);
     CliScanApp._instances.set(instanceId, state);
     CliScanApp._wireTabs(container, state);
     CliScanApp._wireRail(container, state);
@@ -215,6 +226,18 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       tab.removeEventListener(type || 'shown.bs.tab', fn);
     });
     state._tabListeners = [];
+    const modalEl =
+      state.modalEl ||
+      document.querySelector(`[data-cli-scan-modal="${state.instanceId}"]`);
+    if (modalEl) {
+      try {
+        window.bootstrap?.Modal.getInstance(modalEl)?.dispose();
+      } catch (_err) {
+        /* ignore */
+      }
+      modalEl.remove();
+      state.modalEl = null;
+    }
     state._destroyed = true;
     CliScanApp._instances.delete(state.instanceId);
   };
@@ -561,9 +584,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
   </ul>
   <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom min-h-0 cli-scan-tab-content">
     <div class="tab-pane fade show active h-100 min-h-0" id="${id}-pane-scan" role="tabpanel">
-      <div class="row g-0 h-100 min-h-0 cli-scan-scan-layout">
-        <div class="col-12 col-lg-10 border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-options-palette></div>
-        <div class="col-12 col-lg-2 cli-scan-rail cli-scan-command-palette p-2 d-flex flex-column gap-2 min-h-0">
+      <div class="row g-0 h-100 min-h-0 cli-scan-scan-layout${state.layout === 'composer' ? ' cli-scan-scan-layout--composer' : ''}">
+        <div class="${state.layout === 'composer' ? 'col cli-scan-form-col' : 'col-12 col-lg-10'} border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-options-palette></div>
+        <div class="${state.layout === 'composer' ? 'col-auto cli-scan-rail' : 'col-12 col-lg-2 cli-scan-rail'} cli-scan-command-palette p-2 d-flex flex-column gap-2 min-h-0">
           <div class="d-grid gap-2 flex-shrink-0" data-cli-scan-rail-actions></div>
           <label class="small fw-semibold mt-2 flex-shrink-0">Command preview</label>
           <pre class="cli-scan-command-preview small bg-body-secondary bg-opacity-25 border rounded p-2 mb-0 flex-grow-1" data-cli-scan-command></pre>
@@ -598,8 +621,26 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     <div class="tab-pane fade cli-scan-pane-scroll" id="${id}-pane-report" role="tabpanel"><div class="profiling-markdown-doc p-3" data-cli-scan-report></div></div>
   </div>
   <footer class="small text-body-secondary px-2 py-1 border-top" data-cli-scan-status aria-live="polite"></footer>
-  <div class="modal fade" tabindex="-1" data-cli-scan-modal><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" data-cli-scan-modal-title>Document</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body profiling-markdown-doc" data-cli-scan-modal-body></div></div></div></div>
+  <div class="modal fade" tabindex="-1" id="${id}-doc-modal" data-cli-scan-modal="${id}" data-cli-scan-instance="${id}"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" data-cli-scan-modal-title>Document</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body profiling-markdown-doc" data-cli-scan-modal-body></div></div></div></div>
 </div>`;
+  };
+
+  /**
+   * Host modals on document.body so Bootstrap backdrops (z-index ~1050) cannot
+   * cover the dialog. Nested hosts (Composer slide-in with transform/overflow)
+   * otherwise trap the modal under the page mask.
+   */
+  CliScanApp._ensureModalOnBody = function (container, state) {
+    let modalEl =
+      state.modalEl ||
+      container.querySelector('[data-cli-scan-modal]') ||
+      document.querySelector(`[data-cli-scan-modal="${state.instanceId}"]`);
+    if (!modalEl) return null;
+    state.modalEl = modalEl;
+    if (modalEl.parentElement !== document.body) {
+      document.body.appendChild(modalEl);
+    }
+    return modalEl;
   };
 
   CliScanApp._setStatus = function (container, state, msg) {
@@ -746,8 +787,12 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     let valueMode;
     if (/[A-Za-z0-9]<[^>]+>$/.test(raw)) valueMode = 'attached';
     else if (/\s+<[^>]+>$/.test(raw)) valueMode = 'space';
-    else if (['select', 'integer', 'float', 'path'].includes(flag.type)) valueMode = 'space';
-    else valueMode = 'none';
+    else if (['select', 'integer', 'float', 'path', 'string'].includes(flag.type)) {
+      // string: default space so path flags (-dL) get a value box; switches
+      // mistyped as string are demoted to toggles in _initialValues when argv
+      // has no following value.
+      valueMode = 'space';
+    } else valueMode = 'none';
 
     const head = raw.replace(/\s+<[^>]+>$/, '').replace(/<[^>]+>$/, '');
     const parts = head.split('/').filter(Boolean);
@@ -788,9 +833,17 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     for (let i = 0; i < cmdParts.length; i += 1) {
       const p = cmdParts[i];
       if (p === tok) {
-        if (row.valueMode === 'none') return { enabled: true, value: '' };
         const next = cmdParts[i + 1];
-        const looksLikeFlag = next != null && next !== '-' && next.startsWith('-') && next.length > 1;
+        const looksLikeFlag =
+          next != null && next !== '-' && next.startsWith('-') && !next.startsWith('-$') && next.length > 1;
+        // Schema may mark value-taking flags as boolean; still bind workflow
+        // placeholders / bare paths when they follow the flag in argv.
+        if (row.valueMode === 'none') {
+          if (next != null && !looksLikeFlag) {
+            return { enabled: true, value: next, inferredValue: true };
+          }
+          return { enabled: true, value: '' };
+        }
         if (next == null || looksLikeFlag) return { enabled: true, value: '' };
         return { enabled: true, value: next };
       }
@@ -804,7 +857,15 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     return null;
   };
 
-  CliScanApp._chooseColCount = function (flagCount) {
+  CliScanApp._chooseColCount = function (flagCount, state) {
+    // Composer slide-in is narrower (~9 option cols + 2-col rail) — never use 3 columns.
+    const narrow =
+      state?.layout === 'composer' ||
+      state?.container?.closest?.('.composer-cliscan-slot');
+    if (narrow) {
+      if (flagCount <= 4) return 1;
+      return 2;
+    }
     if (flagCount <= 3) return 1;
     if (flagCount <= 10) return 2;
     return 3;
@@ -828,6 +889,21 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       : null;
     const cmdParts = argvParts || (cmd ? cmd.split(/\s+/) : []);
     const rows = CliScanApp._buildRows(schema);
+    // Tokens consumed as flag values (so positionals do not steal `$step.files.*`).
+    const consumedValueIdx = new Set();
+    rows.forEach((row) => {
+      if (row.isPositional || !cmdParts.length) return;
+      const detected = CliScanApp._detectRowInCommand(row, cmdParts);
+      if (!detected || !detected.value) return;
+      const tok = row.displayToken;
+      for (let i = 0; i < cmdParts.length; i += 1) {
+        if (cmdParts[i] === tok && cmdParts[i + 1] === detected.value) {
+          consumedValueIdx.add(i + 1);
+          break;
+        }
+      }
+    });
+
     rows.forEach((row) => {
       let detected = null;
       if (cmdParts.length) detected = CliScanApp._detectRowInCommand(row, cmdParts);
@@ -836,10 +912,17 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         for (let i = 0; i < cmdParts.length; i += 1) {
           const p = cmdParts[i];
           if (i === 0 && !argvParts) continue;
-          if (p.startsWith('-')) continue;
-          if (p.startsWith('$')) continue;
+          if (consumedValueIdx.has(i)) continue;
+          if (p.startsWith('-') && !p.startsWith('-$')) continue;
+          // Allow workflow placeholders (`$step.files.input`) as positional values.
           const prev = i > 0 ? cmdParts[i - 1] : '';
-          if (prev && prev.startsWith('-') && prev !== '-') continue;
+          if (prev && prev.startsWith('-') && prev !== '-' && !prev.startsWith('-$')) {
+            // Previous token is a flag that likely owns this value — skip for bare positionals.
+            const prevRow = rows.find(
+              (r) => !r.isPositional && r.displayToken === prev && r.valueMode !== 'none'
+            );
+            if (prevRow) continue;
+          }
           posVal = p;
           break;
         }
@@ -849,9 +932,24 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         };
         return;
       }
+      // Boolean-typed schema flags that still carry a value in workflow argv
+      // need a value control for Scan ↔ YAML sync (e.g. `-o $step.files.output`).
+      if (detected?.inferredValue && row.valueMode === 'none') {
+        row.valueMode = 'space';
+      }
+      // Many tools mark switch flags as type=string; demote to toggle when argv
+      // has no following value (keeps -oJ/-silent clean while -dL keeps its path).
+      if (
+        row.flag.type === 'string' &&
+        row.valueMode === 'space' &&
+        detected?.enabled &&
+        !detected.value
+      ) {
+        row.valueMode = 'none';
+      }
       const defaultEnabled = Boolean(row.flag.default);
       values[row.key] = detected
-        ? detected
+        ? { enabled: detected.enabled, value: detected.value || '' }
         : {
           enabled: defaultEnabled,
           value: row.valueMode !== 'none' && typeof row.flag.default === 'string' ? row.flag.default : '',
@@ -880,6 +978,8 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       const tok = row.displayToken;
       if (row.valueMode === 'none') {
         tokens.push(tok);
+        // Preserve values inferred from workflow argv on mis-typed schema flags.
+        if (v.value !== '' && v.value != null) tokens.push(String(v.value));
         return;
       }
       if (row.valueMode === 'attached' && v.value !== '' && v.value != null) {
@@ -944,7 +1044,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     groupOrder.forEach((groupName) => {
       const groupRows = (byGroup.get(groupName) || []).filter((r) => !r.isPositional);
       if (!groupRows.length) return;
-      const cols = CliScanApp._chooseColCount(groupRows.length);
+      const cols = CliScanApp._chooseColCount(groupRows.length, state);
       const buckets = CliScanApp._distributeFlags(groupRows, cols);
       const bucketHtml = buckets
         .map(
@@ -1127,10 +1227,13 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     };
     const titles = { options: 'CLI Options', 'graph-structure': 'Graph Structure', 'zero-to-hero': 'Zero to Hero Guide' };
     const doc = await Connection.fetchJson(paths[kind]);
-    const modalEl = container.querySelector('[data-cli-scan-modal]');
-    container.querySelector('[data-cli-scan-modal-title]').textContent = `${state.toolId} — ${titles[kind]}`;
-    await CliScanApp.renderMarkdownDoc(container.querySelector('[data-cli-scan-modal-body]'), doc.markdown, 'No content.');
-    window.bootstrap?.Modal.getOrCreateInstance(modalEl).show();
+    const modalEl = CliScanApp._ensureModalOnBody(container, state);
+    if (!modalEl || !window.bootstrap?.Modal) return;
+    const titleEl = modalEl.querySelector('[data-cli-scan-modal-title]');
+    const bodyEl = modalEl.querySelector('[data-cli-scan-modal-body]');
+    if (titleEl) titleEl.textContent = `${state.toolId} — ${titles[kind]}`;
+    await CliScanApp.renderMarkdownDoc(bodyEl, doc.markdown, 'No content.');
+    window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
   };
 
   CliScanApp._renderOutputs = async function (container, state) {

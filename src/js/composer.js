@@ -259,7 +259,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   /**
    * Seed CliScanApp detail from the step's current workflow `config.argv`.
    * @param {string} stepId
-   * @returns {{ argv: string[] }|null}
+   * @returns {{ argv: string[], command?: string }|null}
    */
   Composer._detailFromStepArgv = function (stepId) {
     const wf = Widgets.ComposerWorkflow;
@@ -267,8 +267,46 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     const ownerId = wf.argvOwnerStepId?.(stepId) || stepId;
     if (!ownerId) return null;
     const argv = wf.parseStepArgv(wf.getWorkflowYaml?.() || '', ownerId);
-    if (!argv.length) return null;
-    return { argv };
+    if (!Array.isArray(argv) || !argv.length) return null;
+    return { argv, command: argv.join(' ') };
+  };
+
+  /**
+   * Re-seed the open CliScanApp Scan form from current workflow YAML argv
+   * (iframe edit → Scan tab). Skips while we are pushing options → YAML.
+   */
+  Composer.syncCliScanAppFromWorkflowYaml = function () {
+    if (!Composer._cliScanApp || !Composer._selectedStepId) return;
+    if (Composer._optionYamlTimer || Composer._suppressArgvReload) return;
+    if (Composer._cliScanHasRun) return;
+    const detail = Composer._detailFromStepArgv(Composer._selectedStepId);
+    if (!detail) return;
+    let current = [];
+    try {
+      current = Composer._cliScanApp.getArgvTokens?.() || [];
+    } catch (_err) {
+      current = [];
+    }
+    if (JSON.stringify(current) === JSON.stringify(detail.argv)) return;
+    try {
+      Composer._cliScanApp.reload({
+        detail,
+        hasRun: false,
+        mode: 'edit-run',
+        runEnabled: Composer.runEnabledFromValidation(
+          Widgets.ComposerWorkflow?.getLastValidation?.() || null,
+          false
+        ),
+        executeContext: Composer.resolveExecuteContext(Composer._selectedStepId),
+        onOptionsChange: Composer._onCliScanOptionsChange,
+        onScanComplete: Composer._onCliScanComplete,
+      });
+      Composer.setStatus(
+        `Scan options refreshed from workflow YAML (${detail.argv.length} argv tokens).`
+      );
+    } catch (err) {
+      console.warn('Composer.syncCliScanAppFromWorkflowYaml', err);
+    }
   };
 
   /**
@@ -793,7 +831,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     const wf = Widgets.ComposerWorkflow;
     const stepId = Composer._selectedStepId;
     if (!wf?.applyStepOptionArgv || !stepId) return;
+    Composer._suppressArgvReload = true;
     const result = wf.applyStepOptionArgv(stepId, snapshot?.argv || []);
+    window.setTimeout(() => {
+      Composer._suppressArgvReload = false;
+    }, 400);
     if (!result?.ok) {
       if (result?.reason === 'argv-block-missing') {
         Composer.setStatus(
@@ -930,6 +972,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         container: slot,
         toolId,
         mode,
+        layout: 'composer',
         scenarioKey: stepId || null,
         detail,
         hasRun,
@@ -1301,6 +1344,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     });
   };
 
+  /** Workflow YAML changed in iframe → keep Scan tab options in sync. */
+  Composer._bindYamlChangedListener = function () {
+    if (Composer._yamlChangedBound) return;
+    Composer._yamlChangedBound = true;
+    window.addEventListener('composer-workflow:yaml-changed', () => {
+      Composer.syncCliScanAppFromWorkflowYaml();
+    });
+  };
+
   /** R13-18 — leaving edit mode (spectacles) persists editor YAML via PUT + re-fetch. */
   Composer._bindEditModePersistListener = function () {
     if (Composer._editModePersistBound) return;
@@ -1326,6 +1378,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.bindLayoutControls(el);
     Composer._bindStepSelectedListener();
     Composer._bindValidationResultListener();
+    Composer._bindYamlChangedListener();
     Composer._bindEditModePersistListener();
     Composer._bindRunWorkflowButton();
     Composer.setLeftState('partial');
@@ -1337,6 +1390,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     }
     if (Widgets.ComposerTempGraph?.initFromComposer) {
       Widgets.ComposerTempGraph.initFromComposer();
+    }
+    // First Composer open: restore session default or first Projects-table row.
+    if (Widgets.Projects?.restoreComposerFromStorage) {
+      Widgets.Projects.restoreComposerFromStorage().catch((err) => {
+        console.warn('Composer.initPanel restoreComposerFromStorage', err);
+      });
     }
     Composer.setStatus(
       'Composer layout ready — select a YAML step for Scan Now, or Run Workflow when valid.'
