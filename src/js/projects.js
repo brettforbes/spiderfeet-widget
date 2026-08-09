@@ -359,11 +359,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           ? result.message || 'API returned an empty stub list.'
           : '';
         Projects.showEmpty(emptyNote);
+        Projects.renderComposerProjectMenu([]);
         Projects.setStatus(result.stub ? 'No projects (stub).' : 'No projects.');
         return;
       }
 
       Projects.renderTable(projects.map((p) => Projects.normalizeProject(p)));
+      Projects.renderComposerProjectMenu(
+        projects.map((p) => Projects.normalizeProject(p))
+      );
       Projects.setStatus(
         `${projects.length} project${projects.length === 1 ? '' : 's'}` +
           (result.stub ? ' (stub)' : '')
@@ -630,13 +634,87 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   /**
    * Update Composer chrome (label / meta / status) without replacing the AR1 layout.
    */
+  Projects.renderComposerProjectMenu = function (projects) {
+    const menu = document.getElementById('composer-project-menu');
+    if (!menu) return;
+    const addCheck = document.getElementById('composer-add-new-project');
+    const list = Array.isArray(projects) ? projects : Object.values(Projects._projectsById || {});
+    const selectedId =
+      Projects.projectId(Composer.selectedProject) || Projects._selectedProjectId || '';
+
+    // Keep the add-new checkbox + divider; replace the rest.
+    menu.querySelectorAll('[data-composer-project-item], #composer-project-menu-empty').forEach((n) => {
+      n.remove();
+    });
+
+    if (!list.length) {
+      const empty = document.createElement('li');
+      empty.id = 'composer-project-menu-empty';
+      empty.className = 'px-3 py-1 small text-body-secondary';
+      empty.textContent = 'No projects yet';
+      menu.appendChild(empty);
+    } else {
+      list.forEach((project) => {
+        const id = Projects.projectId(project);
+        if (!id) return;
+        const name = Projects.projectName(project) || id;
+        const li = document.createElement('li');
+        li.setAttribute('data-composer-project-item', '1');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'dropdown-item small' + (id === selectedId ? ' active' : '');
+        btn.dataset.projectId = id;
+        btn.textContent = name;
+        btn.title = id;
+        btn.addEventListener('click', () => {
+          if (addCheck) addCheck.checked = false;
+          Projects.openProjectInComposer(id);
+        });
+        li.appendChild(btn);
+        menu.appendChild(li);
+      });
+    }
+
+    if (addCheck && !addCheck.dataset.bound) {
+      addCheck.dataset.bound = '1';
+      addCheck.addEventListener('change', () => {
+        if (!addCheck.checked) return;
+        addCheck.checked = false;
+        // Close dropdown then open modal.
+        const toggle = document.getElementById('composer-project-dropdown');
+        if (toggle && window.bootstrap?.Dropdown) {
+          window.bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
+        }
+        Projects.openCreateModal();
+      });
+    }
+  };
+
+  Projects.refreshComposerProjectMenu = async function () {
+    // Prefer cached list; refresh from API when empty.
+    let list = Object.values(Projects._projectsById || {});
+    if (!list.length && SpiderfeetApi?.listProjects) {
+      const result = await SpiderfeetApi.listProjects();
+      if (result && result.ok) {
+        list = (result.projects || []).map((p) => Projects.normalizeProject(p));
+        Projects._projectsById = {};
+        list.forEach((p) => {
+          const id = Projects.projectId(p);
+          if (id) Projects._projectsById[id] = p;
+        });
+      }
+    }
+    Projects.renderComposerProjectMenu(list);
+  };
+
   Projects.renderComposerPlaceholder = function (project, note) {
     const label = document.getElementById('composer-project-label');
     const meta = document.getElementById('composer-project-meta');
     const id = Projects.projectId(project);
+    const name = Projects.projectName(project);
 
     if (label) {
-      label.textContent = id ? `Project ${id}` : 'No project selected';
+      label.textContent = id ? name || `Project ${id}` : 'No project selected';
     }
 
     if (!id) {
@@ -842,6 +920,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         Projects.loadProjects();
       }
       if (event.detail?.tabId === 'composer') {
+        Projects.refreshComposerProjectMenu();
         Projects.restoreComposerFromStorage();
       }
     });

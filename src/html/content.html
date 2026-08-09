@@ -278,10 +278,38 @@
       data-widget="composer-panel"
     >
       <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
-        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex align-items-center gap-2">
+        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex align-items-center gap-2 flex-wrap">
           <h2 class="h6 text-uppercase text-body-secondary mb-0">Composer</h2>
-          <span class="small text-body-secondary me-auto" id="composer-project-label">No project selected</span>
-          <span class="small text-body-secondary d-none" id="composer-project-meta" aria-live="polite"></span>
+          <div class="dropdown">
+            <button
+              class="btn btn-sm btn-outline-secondary dropdown-toggle"
+              type="button"
+              id="composer-project-dropdown"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              aria-label="Select project"
+            >
+              <span id="composer-project-label">No project selected</span>
+            </button>
+            <ul
+              class="dropdown-menu"
+              id="composer-project-menu"
+              aria-labelledby="composer-project-dropdown"
+              style="max-height: 18rem; overflow: auto; min-width: 16rem"
+            >
+              <li class="px-3 py-1">
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="checkbox" id="composer-add-new-project" />
+                  <label class="form-check-label small" for="composer-add-new-project">Add new project</label>
+                </div>
+              </li>
+              <li><hr class="dropdown-divider" /></li>
+              <li class="px-3 py-1 small text-body-secondary" id="composer-project-menu-empty">
+                Loading projects…
+              </li>
+            </ul>
+          </div>
+          <span class="small text-body-secondary me-auto d-none" id="composer-project-meta" aria-live="polite"></span>
           <button
             type="button"
             class="btn btn-sm btn-primary"
