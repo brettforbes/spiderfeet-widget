@@ -248,7 +248,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     const title = options?.title || '';
     const detail = options?.detail || '';
     slot.className =
-      'composer-cliscan-slot flex-grow-1 d-flex flex-column align-items-center justify-content-center text-body-secondary p-3 overflow-auto min-h-0';
+      'composer-cliscan-slot flex-grow-1 d-flex flex-column align-items-center justify-content-center text-body-secondary p-2 overflow-auto min-h-0';
     slot.innerHTML = [
       title ? `<p class="fw-semibold text-body mb-2 text-center">${escHtml(title)}</p>` : '',
       `<p class="small mb-0 text-center">${escHtml(message || '')}</p>`,
