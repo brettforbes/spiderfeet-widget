@@ -157,6 +157,14 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
     return SpiderfeetApi.request(`/projects/${encodeURIComponent(id)}`);
   };
 
+  /** R13-06 / R13-15 — one-call Composer load with workflow_yaml inline. */
+  SpiderfeetApi.getProjectComplete = async function (id) {
+    if (SpiderfeetApi._stubEnabled()) {
+      return SpiderfeetApi._mutateUnavailable('GET /projects/:id/complete');
+    }
+    return SpiderfeetApi.request(`/projects/${encodeURIComponent(id)}/complete`);
+  };
+
   SpiderfeetApi.createProject = async function (body) {
     if (SpiderfeetApi._stubEnabled()) {
       return SpiderfeetApi._mutateUnavailable('POST /projects');
