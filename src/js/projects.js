@@ -252,19 +252,42 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Projects.bindTable(main);
   };
 
+  Projects.selectProjectRow = function (projectId) {
+    Projects._selectedProjectId = projectId || null;
+    document.querySelectorAll('#projects-table .projects-row').forEach((row) => {
+      const selected = row.dataset.projectId === projectId;
+      row.classList.toggle('table-active', selected);
+      row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+  };
+
   Projects.bindTable = function (root) {
     root.querySelectorAll('.projects-row').forEach((row) => {
+      // R13-15: single-click selects; double-click opens in Composer.
       row.addEventListener('click', (event) => {
         if (event.target.closest('[data-project-action]')) return;
         const id = row.dataset.projectId;
-        if (id) Projects.openProjectInComposer(id);
+        if (id) Projects.selectProjectRow(id);
       });
-      row.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
+      row.addEventListener('dblclick', (event) => {
         if (event.target.closest('[data-project-action]')) return;
         event.preventDefault();
         const id = row.dataset.projectId;
         if (id) Projects.openProjectInComposer(id);
+      });
+      row.addEventListener('keydown', (event) => {
+        if (event.target.closest('[data-project-action]')) return;
+        const id = row.dataset.projectId;
+        if (!id) return;
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          Projects.openProjectInComposer(id);
+          return;
+        }
+        if (event.key === ' ') {
+          event.preventDefault();
+          Projects.selectProjectRow(id);
+        }
       });
     });
 
@@ -647,6 +670,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (!projectId || Projects._busy) return;
     Projects._busy = true;
     Projects.clearAlert();
+    Projects.selectProjectRow(projectId);
     Projects.setStatus(`Opening ${projectId}…`);
 
     let project = Projects._projectsById[projectId]
@@ -655,7 +679,38 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     let note = '';
 
     try {
-      if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
+      // R13-15 / R13-06 — prefer /complete so Composer gets workflow_yaml inline.
+      if (SpiderfeetApi && typeof SpiderfeetApi.getProjectComplete === 'function') {
+        const complete = await SpiderfeetApi.getProjectComplete(projectId);
+        if (complete && complete.ok) {
+          const nested = complete.project || complete;
+          project = Projects.normalizeProject(nested, projectId);
+          const workflows = Array.isArray(complete.workflows) ? complete.workflows : [];
+          project.workflows = workflows;
+          const primary =
+            workflows.find((w) => w && w.workflow_yaml) || workflows[0] || null;
+          if (primary) {
+            project.workflow_yaml = primary.workflow_yaml || project.workflow_yaml;
+            project.primary_workflow_id =
+              primary.workflow_id || project.primary_workflow_id;
+            if (Widgets.Composer) {
+              Widgets.Composer.selectedWorkflow = primary;
+            }
+          }
+        } else if (SpiderfeetApi.getProject) {
+          const result = await SpiderfeetApi.getProject(projectId);
+          if (result && result.ok) {
+            project = Projects.normalizeProject(result, projectId);
+            note = 'Complete project endpoint unavailable; loaded base project.';
+          } else {
+            note = Projects.apiUnavailableMessage('Fetch project', complete || result);
+            note += ' Using list-row data for navigation.';
+          }
+        } else {
+          note = Projects.apiUnavailableMessage('Fetch project complete', complete);
+          note += ' Using list-row data for navigation.';
+        }
+      } else if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
         const result = await SpiderfeetApi.getProject(projectId);
         if (result && result.ok) {
           project = Projects.normalizeProject(result, projectId);
@@ -671,7 +726,6 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Projects.persistSelectedProject(project);
     Projects.renderComposerPlaceholder(project, note || null);
 
-    // AS2 / R11-10 — push workflow_yaml into the editor when the project carries it.
     if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
       Widgets.ComposerWorkflow.syncYamlFromComposer();
     }
@@ -723,7 +777,22 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     };
     let note = '';
 
-    if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
+    if (SpiderfeetApi && typeof SpiderfeetApi.getProjectComplete === 'function') {
+      const complete = await SpiderfeetApi.getProjectComplete(projectId);
+      if (complete && complete.ok) {
+        project = Projects.normalizeProject(complete.project || complete, projectId);
+        const workflows = Array.isArray(complete.workflows) ? complete.workflows : [];
+        project.workflows = workflows;
+        const primary =
+          workflows.find((w) => w && w.workflow_yaml) || workflows[0] || null;
+        if (primary) {
+          project.workflow_yaml = primary.workflow_yaml || project.workflow_yaml;
+          if (Widgets.Composer) Widgets.Composer.selectedWorkflow = primary;
+        }
+      } else {
+        note = Projects.apiUnavailableMessage('Re-fetch project complete', complete);
+      }
+    } else if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
       const result = await SpiderfeetApi.getProject(projectId);
       if (result && result.ok) {
         project = Projects.normalizeProject(result, projectId);
