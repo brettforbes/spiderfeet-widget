@@ -373,30 +373,65 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     el.textContent = message;
   };
 
+  Projects.newProjectUuid = function () {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  Projects.nowIso = function () {
+    return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  };
+
   Projects.openCreateModal = function () {
     const title = document.getElementById('projects-modal-title');
+    const modeInput = document.getElementById('projects-form-mode');
     const idInput = document.getElementById('projects-form-id');
+    const nameInput = document.getElementById('projects-form-name');
+    const descInput = document.getElementById('projects-form-description');
+    const createdInput = document.getElementById('projects-form-created');
     const stixInput = document.getElementById('projects-form-stix');
     const submit = document.getElementById('projects-form-submit');
     if (title) title.textContent = 'New Project';
-    if (idInput) idInput.value = '';
+    if (modeInput) modeInput.value = 'create';
+    if (idInput) idInput.value = `project--${Projects.newProjectUuid()}`;
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    if (createdInput) createdInput.value = Projects.nowIso();
     if (stixInput) stixInput.value = '';
-    if (submit) submit.textContent = 'Create';
+    if (submit) submit.textContent = 'Create Project';
     Projects.setFormError('');
     Projects.clearAlert();
     const modal = Projects.getModal();
     if (modal) modal.show();
     else Projects.showAlert('Bootstrap Modal is not available.');
+    if (nameInput) nameInput.focus();
   };
 
   Projects.openEditModal = function (projectId) {
     const project = Projects._projectsById[projectId] || { id: projectId };
     const title = document.getElementById('projects-modal-title');
+    const modeInput = document.getElementById('projects-form-mode');
     const idInput = document.getElementById('projects-form-id');
+    const nameInput = document.getElementById('projects-form-name');
+    const descInput = document.getElementById('projects-form-description');
+    const createdInput = document.getElementById('projects-form-created');
     const stixInput = document.getElementById('projects-form-stix');
     const submit = document.getElementById('projects-form-submit');
     if (title) title.textContent = 'Edit Project';
+    if (modeInput) modeInput.value = 'edit';
     if (idInput) idInput.value = projectId;
+    if (nameInput) nameInput.value = Projects.projectName(project);
+    if (descInput) descInput.value = Projects.projectDescription(project);
+    if (createdInput) {
+      createdInput.value =
+        Projects.projectCreated(project) || Projects.formatCreated(Projects.projectCreated(project));
+    }
     if (stixInput) stixInput.value = Projects.stixIncidentId(project);
     if (submit) submit.textContent = 'Save';
     Projects.setFormError('');
@@ -407,8 +442,19 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   Projects.buildFormBody = function () {
+    const name = (document.getElementById('projects-form-name')?.value || '').trim();
+    const description = (
+      document.getElementById('projects-form-description')?.value || ''
+    ).trim();
+    const projectId = (document.getElementById('projects-form-id')?.value || '').trim();
+    const created = (document.getElementById('projects-form-created')?.value || '').trim();
     const stix = (document.getElementById('projects-form-stix')?.value || '').trim();
-    const body = {};
+    const body = {
+      project_name: name,
+      project_description: description,
+    };
+    if (projectId) body.project_id = projectId;
+    if (created) body.project_created = created;
     if (stix) body.stix_incident_id = stix;
     return body;
   };
@@ -419,8 +465,17 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Projects._busy = true;
     Projects.setFormError('');
 
-    const editId = (document.getElementById('projects-form-id')?.value || '').trim();
+    const mode = (document.getElementById('projects-form-mode')?.value || 'create').trim();
+    const editId =
+      mode === 'edit'
+        ? (document.getElementById('projects-form-id')?.value || '').trim()
+        : '';
     const body = Projects.buildFormBody();
+    if (!body.project_name) {
+      Projects.setFormError('Name is required.');
+      Projects._busy = false;
+      return;
+    }
     const submit = document.getElementById('projects-form-submit');
     if (submit) submit.disabled = true;
 
@@ -438,6 +493,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         }
         Projects.getModal()?.hide();
         Projects.showAlert(`Updated project ${editId}.`, 'success');
+        await Projects.loadProjects();
       } else {
         if (!SpiderfeetApi || typeof SpiderfeetApi.createProject !== 'function') {
           Projects.setFormError('SpiderfeetApi.createProject is not available.');
@@ -448,13 +504,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           Projects.setFormError(Projects.apiUnavailableMessage('Create project', result));
           return;
         }
-        const created = Projects.normalizeProject(result);
-        const createdId = Projects.projectId(created) || '(new)';
+        const created = Projects.normalizeProject(result.data || result);
+        const createdId = Projects.projectId(created) || body.project_id || '(new)';
         Projects.getModal()?.hide();
         Projects.showAlert(`Created project ${createdId}.`, 'success');
+        await Projects.loadProjects();
+        // R13-14: redirect into Composer with the new project loaded.
+        if (createdId && createdId !== '(new)') {
+          await Projects.openProjectInComposer(createdId);
+        }
       }
-
-      await Projects.loadProjects();
     } catch (err) {
       Projects.setFormError((err && err.message) || String(err));
     } finally {
