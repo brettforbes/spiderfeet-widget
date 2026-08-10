@@ -378,6 +378,41 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
     );
   };
 
+  /**
+   * SPEC-015 R15-12 — background full-workflow execute (202 + run_id).
+   * Poll {@link SpiderfeetApi.getWorkflowStatus} for live step progress.
+   */
+  SpiderfeetApi.executeWorkflowAsync = function (workflowId, options) {
+    const opts = options && typeof options === 'object' ? { ...options } : {};
+    delete opts.timeoutMs;
+    return SpiderfeetApi.request(
+      `/workflows/${encodeURIComponent(workflowId)}/execute-async`,
+      { method: 'POST', body: opts }
+    );
+  };
+
+  /**
+   * SPEC-015 R15-12 — background single-step execute (202 + run_id).
+   */
+  SpiderfeetApi.executeStepAsync = function (workflowId, stepId, options) {
+    const opts = options && typeof options === 'object' ? { ...options } : {};
+    delete opts.timeoutMs;
+    return SpiderfeetApi.request(
+      `/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/execute-async`,
+      { method: 'POST', body: opts }
+    );
+  };
+
+  /**
+   * SPEC-015 R15-12 — cheap per-step scan_status for DAG live progress.
+   * @returns {Promise<{workflow_id:string, run_id?:string, run_state?:string, steps:Array}>}
+   */
+  SpiderfeetApi.getWorkflowStatus = function (workflowId) {
+    return SpiderfeetApi.request(
+      `/workflows/${encodeURIComponent(workflowId)}/status`
+    );
+  };
+
   SpiderfeetApi.getScanStep = function (id) {
     return SpiderfeetApi.request(`/scan-steps/${encodeURIComponent(id)}`);
   };
