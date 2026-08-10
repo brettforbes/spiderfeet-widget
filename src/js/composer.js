@@ -1027,6 +1027,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         let settled = false;
         Composer.startStatusPoller(workflowId, {
           onUpdate(payload) {
+            const runErr = payload?.error ? String(payload.error) : '';
             const running = (payload?.steps || []).find((s) => {
               const st = String(s.scan_status || '').toUpperCase();
               return st === 'STARTING' || st === 'RUNNING';
@@ -1035,6 +1036,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
               Composer.setStatus(
                 `Workflow ${workflowId}: ${running.step_id} running…`
               );
+            } else if (runErr && String(payload?.run_state || '') === 'error') {
+              Composer.setStatus(`Workflow ${workflowId} error: ${runErr}`);
             }
           },
           onTerminal(payload) {
@@ -1061,9 +1064,13 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         console.warn('Composer.runWorkflow temp import', err);
       }
 
+      const runErr = finalPayload?.error ? String(finalPayload.error) : '';
       const parts = [
         result.message || `Workflow ${workflowId} finished (${result.status || 'done'})`,
       ];
+      if (runErr) {
+        parts.push(`error: ${runErr}`);
+      }
       parts.push(
         `steps ${result.succeeded ?? '?'}/${result.step_count ?? '?'}` +
           (result.failed != null ? `, failed ${result.failed}` : '')
