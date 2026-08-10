@@ -392,8 +392,13 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
 
     const api = Widgets.SpiderfeetApi;
-    if (!api || typeof api.executeStep !== 'function') {
-      const message = 'SpiderfeetApi.executeStep is not available.';
+    const useAsync =
+      api &&
+      typeof api.executeStepAsync === 'function' &&
+      typeof api.getWorkflowStatus === 'function' &&
+      typeof Widgets.Composer?.startStatusPoller === 'function';
+    if (!useAsync && (!api || typeof api.executeStep !== 'function')) {
+      const message = 'SpiderfeetApi execute is not available.';
       CliScanApp._setStatus(container, state, message);
       CliScanApp._emitScanComplete(state, { ok: false, kind: 'error', message });
       return { ok: false, kind: 'error', message };
@@ -404,7 +409,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     CliScanApp._setStatus(
       container,
       state,
-      `Executing ${ctx.stepId} via SpiderfeetApi…`
+      useAsync
+        ? `Starting live scan for ${ctx.stepId}…`
+        : `Executing ${ctx.stepId} via SpiderfeetApi…`
     );
 
     const body = {};
@@ -413,8 +420,90 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
 
     let result;
     try {
-      result = await api.executeStep(ctx.workflowId, ctx.stepId, body);
+      if (useAsync) {
+        Widgets.Composer.stopStatusPoller?.();
+        const accepted = await api.executeStepAsync(
+          ctx.workflowId,
+          ctx.stepId,
+          body
+        );
+        if (!accepted || accepted.ok === false) {
+          const message =
+            accepted?.message ||
+            accepted?.detail ||
+            accepted?.error ||
+            'executeStepAsync failed';
+          state.executing = false;
+          CliScanApp._syncRunButton(container, state);
+          CliScanApp._setStatus(container, state, message);
+          const out = { ok: false, kind: 'error', message, result: accepted };
+          CliScanApp._emitScanComplete(state, out);
+          return out;
+        }
+        CliScanApp._setStatus(
+          container,
+          state,
+          `Scanning ${ctx.stepId} (run ${accepted.run_id || '?'}) — live DAG status…`
+        );
+        const finalStatus = await new Promise((resolve, reject) => {
+          Widgets.Composer.startStatusPoller(ctx.workflowId, {
+            onUpdate(payload) {
+              const step = (payload?.steps || []).find(
+                (s) => String(s.step_id || s.stepId) === String(ctx.stepId)
+              );
+              if (!step) return;
+              const ui =
+                Widgets.Composer.mapScanStatusToUi?.(step.scan_status) ||
+                step.scan_status;
+              CliScanApp._setStatus(
+                container,
+                state,
+                `Step ${ctx.stepId}: ${ui}`
+              );
+            },
+            onTerminal(payload) {
+              resolve(payload || {});
+            },
+            onError(err) {
+              console.warn('CliScanApp.runScanNow status poll', err);
+            },
+          });
+          if (!Widgets.Composer._statusPoller) {
+            reject(new Error('Failed to start status poller'));
+          }
+        });
+        const stepRow = (finalStatus.steps || []).find(
+          (s) => String(s.step_id || s.stepId) === String(ctx.stepId)
+        );
+        const scanStatus = String(stepRow?.scan_status || '').toUpperCase();
+        if (scanStatus === 'ERROR-FAILED') {
+          const message = `Step ${ctx.stepId} failed (ERROR-FAILED).`;
+          state.executing = false;
+          CliScanApp._syncRunButton(container, state);
+          CliScanApp._setStatus(container, state, message);
+          const out = {
+            ok: false,
+            kind: 'error',
+            message,
+            result: finalStatus,
+          };
+          CliScanApp._emitScanComplete(state, out);
+          return out;
+        }
+        // Shape a sync-like result so the four-form load path below can reuse getScanStep.
+        result = {
+          ok: true,
+          status: 'ok',
+          scan_instance_id: stepRow?.scan_instance_id || null,
+          step_id: ctx.stepId,
+          workflow_id: ctx.workflowId,
+          run_state: finalStatus.run_state,
+        };
+      } else {
+        result = await api.executeStep(ctx.workflowId, ctx.stepId, body);
+      }
     } catch (err) {
+      Widgets.Composer?.stopStatusPoller?.();
       const message = (err && err.message) || String(err);
       state.executing = false;
       CliScanApp._syncRunButton(container, state);
