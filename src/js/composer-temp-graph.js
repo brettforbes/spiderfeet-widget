@@ -538,21 +538,45 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         ? `${label} · ${sg.stepId} (${nodeCount} nodes)`
         : `${label} (${nodeCount} nodes)`;
       return (
-        `<div class="composer-temp-subgraph-chip d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-body" ` +
-        `data-temp-subgraph-id="${escHtml(sg.subgraphId)}" style="border-left: 3px solid ${accent} !important;">` +
+        `<button type="button" class="composer-temp-subgraph-chip d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-body" ` +
+        `data-temp-subgraph-id="${escHtml(sg.subgraphId)}" style="border-left: 3px solid ${accent} !important;" ` +
+        `title="Centre ${escHtml(title)} in the viewer">` +
         `<span class="small text-truncate" style="max-width: 12rem;" title="${escHtml(title)}">${escHtml(label)}` +
         (sg.stepId
           ? ` <span class="text-body-secondary">· ${escHtml(sg.stepId)}</span>`
           : '') +
         ` <span class="text-body-secondary">(${nodeCount})</span></span>` +
-        `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" ` +
+        `<span role="button" tabindex="0" class="btn btn-sm btn-outline-secondary py-0 px-1" ` +
         `data-temp-subgraph-remove="${escHtml(sg.subgraphId)}" ` +
         `title="Remove ${escHtml(label)}" aria-label="Remove ${escHtml(label)}">` +
-        `<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>` +
-        `</div>`
+        `<i class="fa-solid fa-xmark" aria-hidden="true"></i></span>` +
+        `</button>`
       );
     });
     list.innerHTML = parts.join('');
+  };
+
+  /**
+   * SPEC-016 B4 — centre the temp CanvasGraph on one import's nodes.
+   * @param {string} subgraphId
+   * @returns {boolean}
+   */
+  ComposerTempGraph.centerSubgraph = function (subgraphId) {
+    if (!subgraphId) return false;
+    const sg = ComposerTempGraph._subgraphs.find((s) => s.subgraphId === subgraphId);
+    if (!sg) return false;
+    const ids = (sg.nodes || [])
+      .map((n) => n.temporary_id || n.id)
+      .filter(Boolean);
+    const api = Widgets.Composer?.getCanvasGraph?.('temp-subgraph');
+    if (!api?.centerOnNodes) return false;
+    const ok = api.centerOnNodes(ids);
+    if (ok) {
+      Widgets.Composer?.setStatus?.(
+        `Centred temporary import ${sg.label || subgraphId} (${ids.length} nodes).`
+      );
+    }
+    return ok;
   };
 
   /**
@@ -565,11 +589,19 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     const list = document.getElementById('composer-temp-subgraph-list');
     if (list) {
       list.addEventListener('click', (event) => {
-        const btn = event.target?.closest?.('[data-temp-subgraph-remove]');
-        if (!btn) return;
+        const removeBtn = event.target?.closest?.('[data-temp-subgraph-remove]');
+        if (removeBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = removeBtn.getAttribute('data-temp-subgraph-remove');
+          if (id) ComposerTempGraph.removeSubgraph(id);
+          return;
+        }
+        const chip = event.target?.closest?.('[data-temp-subgraph-id]');
+        if (!chip) return;
         event.preventDefault();
-        const id = btn.getAttribute('data-temp-subgraph-remove');
-        if (id) ComposerTempGraph.removeSubgraph(id);
+        const id = chip.getAttribute('data-temp-subgraph-id');
+        if (id) ComposerTempGraph.centerSubgraph(id);
       });
     }
 
