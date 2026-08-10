@@ -20,6 +20,17 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   ComposerWorkflow.SLOT_ID = 'composer-yaml-slot';
   ComposerWorkflow.PROTOCOL_VERSION = '1.0.0';
 
+  /** Subset of yaml-workflow-widget HOST_MSG used by the Composer host. */
+  ComposerWorkflow.HOST_MSG = {
+    SET_YAML: 'setYaml',
+    SET_THEME: 'setTheme',
+    SELECT_STEP: 'selectStep',
+    SET_EDIT_MODE: 'setEditMode',
+    OPEN_SETTINGS: 'openSettings',
+    RESET_VIEW: 'resetView',
+    SET_STEP_STATUSES: 'setStepStatuses',
+  };
+
   /**
    * Canonical-ish default when no project workflow YAML is loaded yet.
    * Shape matches yaml-workflow-widget `12A2_Workflow_YAML_Example.yaml`.
@@ -1006,6 +1017,25 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     return ComposerWorkflow.postToWidget('setLayoutMode', {
       mode: mode || 'default',
     });
+  };
+
+  /**
+   * SPEC-015 R15-13 — push live step status map into the DAG iframe.
+   * Replace-semantics: pass `{}` / null / undefined to clear.
+   * No-ops safely before iframe `ready`.
+   * @param {Record<string, 'waiting'|'running'|'complete'|'failed'>|null|undefined} statuses
+   * @returns {boolean}
+   */
+  ComposerWorkflow.setStepStatuses = function (statuses) {
+    if (!ComposerWorkflow._ready) return false;
+    const map =
+      statuses && typeof statuses === 'object' && !Array.isArray(statuses)
+        ? statuses
+        : {};
+    return ComposerWorkflow.postToWidget(
+      ComposerWorkflow.HOST_MSG.SET_STEP_STATUSES,
+      { statuses: map }
+    );
   };
 
   ComposerWorkflow.bindChromeControls = function () {
