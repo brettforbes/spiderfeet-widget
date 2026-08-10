@@ -40,6 +40,8 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   ComposerTempGraph._lastOutboundPayload = null;
   /** @type {string|null} */
   ComposerTempGraph._temporarySubgraphId = null;
+  /** @type {string|null} project id that owns `_temporarySubgraphId` / loaded graph */
+  ComposerTempGraph._loadedForProjectId = null;
   ComposerTempGraph._sending = false;
 
   /**
@@ -322,9 +324,15 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
       nodes: cleaned.nodes,
       edges: cleaned.edges,
     };
+    // SPEC-016 B1 — only send a subgraph id when it belongs to the open project.
+    const currentPid = ComposerTempGraph.resolveProjectId();
     const sgId =
       (opts && opts.temporarySubgraphId) ||
-      ComposerTempGraph._temporarySubgraphId ||
+      (ComposerTempGraph._loadedForProjectId &&
+      currentPid &&
+      ComposerTempGraph._loadedForProjectId === currentPid
+        ? ComposerTempGraph._temporarySubgraphId
+        : null) ||
       null;
     if (sgId) payload.temporary_subgraph_id = String(sgId);
     ComposerTempGraph._lastOutboundPayload = payload;
@@ -618,7 +626,57 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   ComposerTempGraph.clear = function () {
     ComposerTempGraph._subgraphs = [];
     ComposerTempGraph._lastOutboundPayload = null;
+    // SPEC-016 B1 — never reuse another project's subgraph id after clear/switch.
+    ComposerTempGraph._temporarySubgraphId = null;
+    ComposerTempGraph._loadedForProjectId = null;
     ComposerTempGraph.refreshViewer();
+  };
+
+  /**
+   * SPEC-016 B1 — replace the in-memory viewer from GET /contexts/temporary.
+   * @param {string} projectId
+   * @returns {Promise<{ ok: boolean, nodeCount?: number, message?: string }>}
+   */
+  ComposerTempGraph.loadFromServer = async function (projectId) {
+    const pid = ComposerTempGraph.resolveProjectId(projectId);
+    if (!pid) {
+      return { ok: false, message: 'No project id for temporary-context load.' };
+    }
+    const Api = Widgets.SpiderfeetApi;
+    if (!Api || typeof Api.getTemporaryContext !== 'function') {
+      return { ok: false, message: 'SpiderfeetApi.getTemporaryContext unavailable.' };
+    }
+
+    ComposerTempGraph.clear();
+    ComposerTempGraph._loadedForProjectId = pid;
+
+    try {
+      const result = await Api.getTemporaryContext(pid);
+      if (!result || result.ok === false) {
+        return {
+          ok: false,
+          message:
+            result?.detail || result?.error || result?.message || 'GET temporary context failed',
+        };
+      }
+      const sgId = result.subgraph_id || result.temporary_subgraph_id || null;
+      if (sgId) ComposerTempGraph._temporarySubgraphId = String(sgId);
+
+      const nodes = Array.isArray(result.nodes) ? result.nodes : [];
+      const edges = Array.isArray(result.edges) ? result.edges : [];
+      if (nodes.length || edges.length) {
+        ComposerTempGraph.importScanGraph(
+          { nodes, edges },
+          { stepId: null, sync: false }
+        );
+      } else {
+        ComposerTempGraph.refreshViewer();
+      }
+      return { ok: true, nodeCount: nodes.length };
+    } catch (err) {
+      console.warn('ComposerTempGraph.loadFromServer', err);
+      return { ok: false, message: (err && err.message) || String(err) };
+    }
   };
 
   /**

@@ -840,6 +840,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
     }
 
+    // SPEC-016 B1 — temporary context is per-project; clear + reload on switch.
+    if (Widgets.Composer?.loadProjectContexts) {
+      try {
+        await Widgets.Composer.loadProjectContexts(projectId);
+      } catch (err) {
+        console.warn('Projects.openProjectInComposer loadProjectContexts', err);
+      }
+    }
+
     if (Widgets.Shell && typeof Widgets.Shell.activateTab === 'function') {
       Widgets.Shell.activateTab('composer');
     }
@@ -956,6 +965,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
       Widgets.ComposerWorkflow.syncYamlFromComposer();
+    }
+
+    // SPEC-016 B1 — restore this project's temporary context (not the prior session's).
+    if (Widgets.Composer?.loadProjectContexts) {
+      try {
+        await Widgets.Composer.loadProjectContexts(projectId);
+      } catch (err) {
+        console.warn('Projects.restoreComposerFromStorage loadProjectContexts', err);
+      }
     }
   };
 

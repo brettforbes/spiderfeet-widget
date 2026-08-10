@@ -1213,6 +1213,32 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * SPEC-016 B1 — clear then reload temporary (+ optional project) context for a project.
+   * @param {string} projectId
+   * @returns {Promise<{ ok: boolean, message?: string }>}
+   */
+  Composer.loadProjectContexts = async function (projectId) {
+    const pid = projectId != null ? String(projectId).trim() : '';
+    if (!pid) return { ok: false, message: 'No project id' };
+    const temp = Widgets.ComposerTempGraph;
+    if (!temp?.loadFromServer) {
+      temp?.clear?.();
+      return { ok: false, message: 'ComposerTempGraph.loadFromServer unavailable' };
+    }
+    Composer._importedTempStepIds = new Set();
+    const result = await temp.loadFromServer(pid);
+    if (result?.ok) {
+      Composer.setStatus(
+        `Loaded temporary context for ${pid}` +
+          (result.nodeCount != null ? ` (${result.nodeCount} nodes)` : '')
+      );
+    } else if (result?.message) {
+      console.warn('Composer.loadProjectContexts', result.message);
+    }
+    return result || { ok: false };
+  };
+
+  /**
    * Reset all scan steps to unscanned + clear temporary context; keep YAML.
    * Cancels in-flight status polling and unwinds DAG chrome (SPEC-015 R15-16).
    * @returns {Promise<object|null>}
@@ -1263,7 +1289,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       if (temp?.clear) temp.clear();
       else Composer.mountCanvasGraph('temp-subgraph', { nodes: [], links: [] });
 
-      if (projectId && Composer.loadProjectContexts) {
+      if (projectId) {
         await Composer.loadProjectContexts(projectId);
       }
 
