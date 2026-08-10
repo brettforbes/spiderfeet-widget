@@ -764,6 +764,45 @@
         getTransform() {
           return transform;
         },
+        /**
+         * SPEC-016 B4 — fit/centre the view on the given node ids (graph coords).
+         * @param {string[]|Set<string>} nodeIds
+         * @param {{ padding?: number }} [opts]
+         * @returns {boolean}
+         */
+        centerOnNodes(nodeIds, opts) {
+          const idSet = nodeIds instanceof Set ? nodeIds : new Set(nodeIds || []);
+          if (!idSet.size) return false;
+          const selected = nodes.filter((n) => idSet.has(n.id));
+          if (!selected.length) return false;
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          selected.forEach((n) => {
+            const r = (n.iconSize || n.r || 10) / 2;
+            if (n.x - r < minX) minX = n.x - r;
+            if (n.y - r < minY) minY = n.y - r;
+            if (n.x + r > maxX) maxX = n.x + r;
+            if (n.y + r > maxY) maxY = n.y + r;
+          });
+          if (!Number.isFinite(minX) || !Number.isFinite(minY)) return false;
+          const pad = opts?.padding != null ? Number(opts.padding) : 48;
+          const bw = Math.max(maxX - minX, 1);
+          const bh = Math.max(maxY - minY, 1);
+          const scale = Math.max(
+            0.2,
+            Math.min(8, Math.min((width - pad * 2) / bw, (height - pad * 2) / bh))
+          );
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+          const next = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(scale)
+            .translate(-cx, -cy);
+          canvasSel.transition().duration(350).call(zoom.transform, next);
+          return true;
+        },
         pinNode,
         unpinNode,
         restart() {
