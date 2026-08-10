@@ -163,22 +163,28 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   };
 
   /**
-   * Lightweight parse of workflow `steps[]` for id + uses (AT1 tool resolve).
+   * Lightweight parse of workflow `steps[]` for id + uses + needs (AT1 / SPEC-015).
    * Avoids a YAML dependency; enough for SpiderFeet workflow step lists.
    * @param {string} [yaml]
-   * @returns {Array<{ id: string, uses: string|null }>}
+   * @returns {Array<{ id: string, uses: string|null, needs: string[] }>}
    */
   ComposerWorkflow.parseWorkflowSteps = function (yaml) {
     const steps = [];
     const lines = String(yaml ?? '').split(/\r?\n/);
     let inSteps = false;
-    /** @type {{ id: string, uses: string|null }|null} */
+    /** @type {{ id: string, uses: string|null, needs: string[], _inNeedsList?: boolean }|null} */
     let current = null;
 
     const stripScalar = (raw) =>
       String(raw || '')
         .trim()
         .replace(/^['"]|['"]$/g, '');
+
+    const splitInlineList = (inner) =>
+      String(inner || '')
+        .split(',')
+        .map((part) => stripScalar(part))
+        .filter(Boolean);
 
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
@@ -202,18 +208,47 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
 
       const idMatch = line.match(/^\s*-\s*id:\s*(.+?)\s*(?:#.*)?$/);
       if (idMatch) {
-        if (current) steps.push(current);
-        current = { id: stripScalar(idMatch[1]), uses: null };
+        if (current) {
+          delete current._inNeedsList;
+          steps.push(current);
+        }
+        current = { id: stripScalar(idMatch[1]), uses: null, needs: [] };
         continue;
       }
       if (!current) continue;
+
+      if (current._inNeedsList) {
+        const needItem = line.match(/^\s+-\s+(.+?)\s*(?:#.*)?$/);
+        if (needItem) {
+          current.needs.push(stripScalar(needItem[1]));
+          continue;
+        }
+        // Left the needs list (next key or next step item).
+        current._inNeedsList = false;
+      }
+
       // `uses` may be indented under the step or (rarely) flush left after `- id`.
       const usesMatch = line.match(/^\s*uses:\s*(.+?)\s*(?:#.*)?$/);
       if (usesMatch) {
         current.uses = stripScalar(usesMatch[1]);
+        continue;
+      }
+
+      const needsInline = line.match(/^\s*needs:\s*\[(.*)\]\s*(?:#.*)?$/);
+      if (needsInline) {
+        current.needs = splitInlineList(needsInline[1]);
+        current._inNeedsList = false;
+        continue;
+      }
+      if (/^\s*needs:\s*(?:#.*)?$/.test(line)) {
+        current.needs = [];
+        current._inNeedsList = true;
       }
     }
-    if (current) steps.push(current);
+    if (current) {
+      delete current._inNeedsList;
+      steps.push(current);
+    }
     return steps;
   };
 

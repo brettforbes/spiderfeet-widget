@@ -50,6 +50,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     cancelled: true,
   };
 
+  /** yaml-workflow-widget chrome node ids (mapper.js). */
+  Composer.WORKFLOW_START_ID = '__workflow_start__';
+  Composer.WORKFLOW_TARGET_ID = '__workflow_target__';
+  /** @type {Record<string, 'waiting'|'running'|'complete'|'failed'>} */
+  Composer._lastStatusMap = {};
+  /** @type {Record<string, string[]>} */
+  Composer._workflowNeedsByStep = {};
+
   /**
    * SPEC-015 §0.1 — backend scan_status → DAG UI state.
    * @param {string|null|undefined} scanStatus
@@ -64,11 +72,64 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * @param {{ steps?: Array<{step_id?: string, stepId?: string, scan_status?: string}> }|null|undefined} statusPayload
+   * Refresh step→needs map from the current editor YAML (for DAG promotion).
+   * @param {string} [yaml]
+   * @returns {Record<string, string[]>}
+   */
+  Composer.refreshWorkflowNeeds = function (yaml) {
+    const text =
+      yaml != null
+        ? String(yaml)
+        : Widgets.ComposerWorkflow?.getWorkflowYaml?.() || '';
+    const steps = Widgets.ComposerWorkflow?.parseWorkflowSteps?.(text) || [];
+    const needsByStep = {};
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (!step?.id) continue;
+      needsByStep[String(step.id)] = Array.isArray(step.needs)
+        ? step.needs.map(String)
+        : [];
+    }
+    Composer._workflowNeedsByStep = needsByStep;
+    return needsByStep;
+  };
+
+  /**
+   * Map GET /workflows/{id}/status → DAG UI statuses with Start/Target chrome,
+   * ready-descendant promotion, and no complete/failed→waiting downgrade.
+   * @param {{
+   *   steps?: Array<{step_id?: string, stepId?: string, scan_status?: string}>,
+   *   run_state?: string
+   * }|null|undefined} statusPayload
+   * @param {{
+   *   previousMap?: Record<string, string>,
+   *   needsByStep?: Record<string, string[]>,
+   *   yaml?: string
+   * }|null} [options]
    * @returns {Record<string, 'waiting'|'running'|'complete'|'failed'>}
    */
-  Composer.statusPayloadToMap = function (statusPayload) {
+  Composer.statusPayloadToMap = function (statusPayload, options) {
+    const opts = options || {};
     const steps = Array.isArray(statusPayload?.steps) ? statusPayload.steps : [];
+    const runState = String(statusPayload?.run_state || '').toLowerCase();
+    const active = runState === 'starting' || runState === 'running';
+    const terminal = !!Composer.TERMINAL_RUN_STATES[runState];
+    const prev =
+      opts.previousMap && typeof opts.previousMap === 'object'
+        ? opts.previousMap
+        : Composer._lastStatusMap || {};
+    let needsByStep =
+      opts.needsByStep && typeof opts.needsByStep === 'object'
+        ? opts.needsByStep
+        : Composer._workflowNeedsByStep;
+    if (
+      (!needsByStep || !Object.keys(needsByStep).length) &&
+      (opts.yaml != null || Widgets.ComposerWorkflow?.getWorkflowYaml)
+    ) {
+      needsByStep = Composer.refreshWorkflowNeeds(opts.yaml);
+    }
+
+    /** @type {Record<string, 'waiting'|'running'|'complete'|'failed'>} */
     const map = {};
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
@@ -76,6 +137,59 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       if (!stepId) continue;
       map[String(stepId)] = Composer.mapScanStatusToUi(step.scan_status);
     }
+
+    // Ensure YAML-known steps appear even before the backend lists them.
+    const knownIds = Object.keys(needsByStep || {});
+    for (let i = 0; i < knownIds.length; i += 1) {
+      const id = knownIds[i];
+      if (map[id] == null) map[id] = 'waiting';
+    }
+
+    // Never downgrade terminal chrome during an active run (httpx flicker fix).
+    if (active) {
+      const prevIds = Object.keys(prev);
+      for (let i = 0; i < prevIds.length; i += 1) {
+        const id = prevIds[i];
+        const was = prev[id];
+        if (
+          (was === 'complete' || was === 'failed') &&
+          (map[id] == null || map[id] === 'waiting')
+        ) {
+          map[id] = was;
+        }
+      }
+    }
+
+    // While running: ready waiting steps (all needs complete, or roots) → running.
+    if (active) {
+      const promoteIds = new Set([
+        ...Object.keys(map),
+        ...Object.keys(needsByStep || {}),
+      ]);
+      promoteIds.forEach((stepId) => {
+        if (
+          stepId === Composer.WORKFLOW_START_ID ||
+          stepId === Composer.WORKFLOW_TARGET_ID
+        ) {
+          return;
+        }
+        const cur = map[stepId] || 'waiting';
+        if (cur !== 'waiting') return;
+        const needs = (needsByStep && needsByStep[stepId]) || [];
+        const ready =
+          needs.length === 0
+            ? true
+            : needs.every((needId) => map[String(needId)] === 'complete');
+        if (ready) map[stepId] = 'running';
+      });
+    }
+
+    if (active || terminal) {
+      map[Composer.WORKFLOW_START_ID] = 'complete';
+      map[Composer.WORKFLOW_TARGET_ID] = 'complete';
+    }
+
+    Composer._lastStatusMap = Object.assign({}, map);
     return map;
   };
 
@@ -109,6 +223,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       hooks: hooks || {},
     };
     Composer._statusPoller = poller;
+    Composer.refreshWorkflowNeeds();
 
     const schedule = (delay) => {
       if (poller.stopped || Composer._statusPoller !== poller) return;
@@ -126,7 +241,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         const payload = await api.getWorkflowStatus(poller.workflowId);
         if (poller.stopped || Composer._statusPoller !== poller) return;
         poller.backoffMs = Composer.STATUS_POLL_MS;
-        const map = Composer.statusPayloadToMap(payload);
+        const map = Composer.statusPayloadToMap(payload, {
+          previousMap: Composer._lastStatusMap,
+          needsByStep: Composer._workflowNeedsByStep,
+        });
         wf?.setStepStatuses?.(map);
         poller.hooks.onUpdate?.(payload, map);
         const runState = payload?.run_state ? String(payload.run_state) : '';
@@ -996,8 +1114,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer.clearWorkflowStatuses = function (statuses) {
     Composer.stopStatusPoller();
     const wf = Widgets.ComposerWorkflow;
+    if (!statuses || typeof statuses !== 'object') {
+      Composer._lastStatusMap = {};
+    }
     if (!wf?.setStepStatuses) return false;
     if (statuses && typeof statuses === 'object') {
+      Composer._lastStatusMap = Object.assign({}, statuses);
       return wf.setStepStatuses(statuses);
     }
     return wf.setStepStatuses({});
@@ -1015,7 +1137,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (!api?.getWorkflowStatus) return null;
     try {
       const payload = await api.getWorkflowStatus(id);
-      const map = Composer.statusPayloadToMap(payload);
+      Composer.refreshWorkflowNeeds();
+      const map = Composer.statusPayloadToMap(payload, {
+        previousMap: Composer._lastStatusMap,
+        needsByStep: Composer._workflowNeedsByStep,
+      });
       Widgets.ComposerWorkflow?.setStepStatuses?.(map);
       return map;
     } catch (err) {
