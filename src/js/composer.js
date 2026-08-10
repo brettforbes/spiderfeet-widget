@@ -36,6 +36,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer.OPTION_YAML_DEBOUNCE_MS = 200;
   /** True while AO2 full-workflow execute is in flight (R11-23). */
   Composer._workflowRunBusy = false;
+  /** True while Reset Workflow is in flight (SPEC-015 R15-16). */
+  Composer._workflowResetBusy = false;
   /** SPEC-015 — single active status poller handle. */
   Composer._statusPoller = null;
   /** Poll interval for live DAG status (R15-14). */
@@ -988,6 +990,153 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * SPEC-015 R15-16 — clear DAG status chrome (all waiting / empty map).
+   * @param {Record<string, string>|null} [statuses] optional explicit map; default clear
+   */
+  Composer.clearWorkflowStatuses = function (statuses) {
+    Composer.stopStatusPoller();
+    const wf = Widgets.ComposerWorkflow;
+    if (!wf?.setStepStatuses) return false;
+    if (statuses && typeof statuses === 'object') {
+      return wf.setStepStatuses(statuses);
+    }
+    return wf.setStepStatuses({});
+  };
+
+  /**
+   * SPEC-015 R15-16 — one-shot paint of persisted step statuses (project open / restore).
+   * @param {string} [workflowId]
+   * @returns {Promise<Record<string, string>|null>}
+   */
+  Composer.paintWorkflowStatuses = async function (workflowId) {
+    const id = String(workflowId || Composer.resolveWorkflowId() || '').trim();
+    if (!id) return null;
+    const api = Widgets.SpiderfeetApi;
+    if (!api?.getWorkflowStatus) return null;
+    try {
+      const payload = await api.getWorkflowStatus(id);
+      const map = Composer.statusPayloadToMap(payload);
+      Widgets.ComposerWorkflow?.setStepStatuses?.(map);
+      return map;
+    } catch (err) {
+      console.warn('Composer.paintWorkflowStatuses', err);
+      return null;
+    }
+  };
+
+  /**
+   * Clear CliScanApp when the selected project changes so prior-run UI cannot
+   * leak across projects (YAML + contexts already swapped).
+   */
+  Composer.resetCliScanForProjectSwitch = function () {
+    Composer._stepSelectSeq = (Composer._stepSelectSeq || 0) + 1;
+    Composer._selectedToolId = null;
+    Composer._selectedStepId = null;
+    Composer._cliScanHasRun = false;
+    Composer._showSlotPlaceholder(
+      'Select a workflow step to open its CLI app.',
+      { title: 'Workflow' }
+    );
+    Composer._setRightTitle('Workflow');
+  };
+
+  /**
+   * Reset all scan steps to unscanned + clear temporary context; keep YAML.
+   * Cancels in-flight status polling and unwinds DAG chrome (SPEC-015 R15-16).
+   * @returns {Promise<object|null>}
+   */
+  Composer.resetWorkflow = async function () {
+    if (Composer._workflowResetBusy || Composer._workflowRunBusy) return null;
+
+    const workflowId = Composer.resolveWorkflowId();
+    if (!workflowId) {
+      Composer.setStatus(
+        'Reset Workflow: cannot resolve workflow id (set YAML `id:` or select a project workflow).'
+      );
+      return null;
+    }
+
+    const projectId = Composer.resolveProjectId();
+    const api = Widgets.SpiderfeetApi;
+    if (!api?.resetWorkflow) {
+      Composer.setStatus('Reset Workflow: SpiderfeetApi.resetWorkflow unavailable.');
+      return null;
+    }
+
+    const btn = document.getElementById('composer-reset-workflow');
+    Composer._workflowResetBusy = true;
+    Composer.clearWorkflowStatuses({});
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Resetting…';
+    }
+    Composer.setStatus(`Resetting workflow ${workflowId}…`);
+
+    try {
+      const body = {};
+      if (projectId) body.project_id = projectId;
+      const result = await api.resetWorkflow(workflowId, body);
+
+      if (!result || result.ok === false) {
+        const msg =
+          result?.message ||
+          result?.detail ||
+          result?.error ||
+          'resetWorkflow failed';
+        Composer.setStatus(`Reset Workflow failed: ${msg}`);
+        return result || null;
+      }
+
+      const temp = Widgets.ComposerTempGraph;
+      if (temp?.clear) temp.clear();
+      else Composer.mountCanvasGraph('temp-subgraph', { nodes: [], links: [] });
+
+      if (projectId && Composer.loadProjectContexts) {
+        await Composer.loadProjectContexts(projectId);
+      }
+
+      const stepId = Composer._selectedStepId;
+      if (stepId && Composer.handleStepSelected) {
+        await Composer.handleStepSelected(stepId);
+      } else {
+        Composer.resetCliScanForProjectSwitch();
+      }
+
+      // Backend rematerialized UNKNOWN shells — paint waiting for all steps.
+      await Composer.paintWorkflowStatuses(workflowId);
+
+      const steps = result.steps_reset != null ? result.steps_reset : '?';
+      Composer.setStatus(
+        result.message ||
+          `Workflow ${workflowId} reset — ${steps} step(s) unscanned; temporary context cleared.`
+      );
+      return result;
+    } catch (err) {
+      Composer.setStatus(
+        `Reset Workflow error: ${(err && err.message) || String(err)}`
+      );
+      return null;
+    } finally {
+      Composer._workflowResetBusy = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Reset Workflow';
+      }
+    }
+  };
+
+  /** Bind Reset Workflow toolbar button (SPEC-015 R15-16). */
+  Composer._bindResetWorkflowButton = function () {
+    if (Composer._resetWorkflowBound) return;
+    const btn = document.getElementById('composer-reset-workflow');
+    if (!btn) return;
+    Composer._resetWorkflowBound = true;
+    btn.addEventListener('click', () => {
+      Composer.resetWorkflow();
+    });
+  };
+
+  /**
    * Debounced CliScanApp option → editor YAML update (R11-14 / AU1).
    * @param {{ argv?: string[] }} snapshot
    */
@@ -1560,6 +1709,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer._bindYamlChangedListener();
     Composer._bindEditModePersistListener();
     Composer._bindRunWorkflowButton();
+    Composer._bindResetWorkflowButton();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
