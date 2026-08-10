@@ -1787,7 +1787,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
           tooltip: `#${meta.tooltipId}`,
           nodes,
           links,
-          variant: 'default',
+          // SPEC-016 B3 — cluster each import group in the temp viewer.
+          variant: paneKey === 'temp-subgraph' ? 'grouped' : 'default',
           nodeDisplay: 'icons',
           linkLabels: false,
           linkDistance: 80,

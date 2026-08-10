@@ -448,7 +448,8 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
           sgIndex % ComposerTempGraph.SUBGRAPH_PALETTE.length
         ];
       const clusterAngle = (2 * Math.PI * sgIndex) / count;
-      const clusterR = 160;
+      // SPEC-016 B3 — seed imports farther apart before grouped force settles.
+      const clusterR = 220;
       const cx = Math.cos(clusterAngle) * clusterR;
       const cy = Math.sin(clusterAngle) * clusterR;
       const localNodes = Array.isArray(sg.nodes) ? sg.nodes : [];
