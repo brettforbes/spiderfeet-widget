@@ -413,6 +413,15 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
     );
   };
 
+  /** Clear all step scan results + temporary context; keep workflow YAML (SPEC-015 R15-04/16). */
+  SpiderfeetApi.resetWorkflow = function (workflowId, options) {
+    const opts = options && typeof options === 'object' ? { ...options } : {};
+    return SpiderfeetApi.request(
+      `/workflows/${encodeURIComponent(workflowId)}/reset`,
+      { method: 'POST', body: opts }
+    );
+  };
+
   SpiderfeetApi.getScanStep = function (id) {
     return SpiderfeetApi.request(`/scan-steps/${encodeURIComponent(id)}`);
   };

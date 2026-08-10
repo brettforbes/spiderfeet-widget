@@ -821,6 +821,25 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       Widgets.ComposerWorkflow.syncYamlFromComposer();
     }
 
+    // SPEC-015 R15-16 — stop any prior poller, then paint persisted step statuses.
+    if (Widgets.Composer?.stopStatusPoller) {
+      Widgets.Composer.stopStatusPoller();
+    }
+    if (Widgets.Composer?.resetCliScanForProjectSwitch) {
+      Widgets.Composer.resetCliScanForProjectSwitch();
+    }
+    if (Widgets.Composer?.paintWorkflowStatuses) {
+      try {
+        await Widgets.Composer.paintWorkflowStatuses(
+          Widgets.Composer.resolveWorkflowId?.() ||
+            project.primary_workflow_id ||
+            null
+        );
+      } catch (err) {
+        console.warn('Projects.openProjectInComposer paintWorkflowStatuses', err);
+      }
+    }
+
     if (Widgets.Shell && typeof Widgets.Shell.activateTab === 'function') {
       Widgets.Shell.activateTab('composer');
     }
