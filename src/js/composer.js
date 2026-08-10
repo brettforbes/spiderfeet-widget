@@ -40,6 +40,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._workflowResetBusy = false;
   /** SPEC-015 — single active status poller handle. */
   Composer._statusPoller = null;
+  /** SPEC-016 B2 — step ids already imported into the temp viewer this run. */
+  Composer._importedTempStepIds = new Set();
   /** Poll interval for live DAG status (R15-14). */
   Composer.STATUS_POLL_MS = 1000;
   Composer.STATUS_POLL_MAX_BACKOFF_MS = 8000;
@@ -896,50 +898,82 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * After AO2 completes, import scan_graph exports into Temporary Subgraph Viewer.
+   * SPEC-016 B2 — import one FINISHED step into the temp viewer (deduped by step id).
+   * @param {object} step
+   * @returns {Promise<boolean>}
+   */
+  Composer._importFinishedStepTempGraph = async function (step) {
+    const api = Widgets.SpiderfeetApi;
+    const temp = Widgets.ComposerTempGraph;
+    if (!temp?.handleScanComplete || !api || !step) return false;
+    if (step.skipped || step.status === 'error') return false;
+    const stepId = step.step_id || step.stepId;
+    if (!stepId) return false;
+    const scanStatus = String(step.scan_status || '').toUpperCase();
+    if (scanStatus && scanStatus !== 'FINISHED') return false;
+    if (Composer._importedTempStepIds.has(stepId)) return false;
+
+    let detail = null;
+    const scanInstanceId = step.scan_instance_id || step.scanInstanceId;
+    if (scanInstanceId && api.getScanStep) {
+      try {
+        const payload = await api.getScanStep(scanInstanceId);
+        if (payload && payload.ok !== false && api.scanStepToDetail) {
+          detail = api.scanStepToDetail(payload);
+        }
+      } catch (err) {
+        console.warn('Composer._importFinishedStepTempGraph getScanStep', err);
+      }
+    }
+
+    const outcome = {
+      ok: true,
+      kind: 'complete',
+      detail: detail || null,
+      result: detail || step,
+    };
+    try {
+      const hit = temp.handleScanComplete(outcome, { stepId });
+      // Mark imported even when export:none so we do not re-fetch forever.
+      Composer._importedTempStepIds.add(stepId);
+      return Boolean(hit?.subgraphId);
+    } catch (err) {
+      console.warn('Composer._importFinishedStepTempGraph import', err);
+      return false;
+    }
+  };
+
+  /**
+   * After AO2 completes (and as a terminal catch-up), import scan_graph exports.
    * @param {object} result executeWorkflow response
    * @returns {Promise<number>} number of discrete imports
    */
   Composer._importWorkflowTempGraphs = async function (result) {
     const steps = Array.isArray(result?.steps) ? result.steps : [];
-    const api = Widgets.SpiderfeetApi;
-    const temp = Widgets.ComposerTempGraph;
-    if (!temp?.handleScanComplete || !api) return 0;
+    if (!steps.length) return 0;
+    const results = await Promise.all(
+      steps.map((step) => Composer._importFinishedStepTempGraph(step))
+    );
+    return results.filter(Boolean).length;
+  };
 
-    let imported = 0;
-    for (let i = 0; i < steps.length; i += 1) {
-      const step = steps[i];
-      if (!step || step.status === 'error' || step.skipped) continue;
-      const stepId = step.step_id || step.stepId;
-      if (!stepId) continue;
-
-      let detail = null;
-      const scanInstanceId = step.scan_instance_id || step.scanInstanceId;
-      if (scanInstanceId && api.getScanStep) {
-        try {
-          const payload = await api.getScanStep(scanInstanceId);
-          if (payload && payload.ok !== false && api.scanStepToDetail) {
-            detail = api.scanStepToDetail(payload);
-          }
-        } catch (err) {
-          console.warn('Composer._importWorkflowTempGraphs getScanStep', err);
-        }
-      }
-
-      const outcome = {
-        ok: true,
-        kind: 'complete',
-        detail: detail || null,
-        result: detail || step,
-      };
-      try {
-        const hit = temp.handleScanComplete(outcome, { stepId });
-        if (hit?.subgraphId) imported += 1;
-      } catch (err) {
-        console.warn('Composer._importWorkflowTempGraphs import', err);
-      }
-    }
-    return imported;
+  /**
+   * SPEC-016 B2 — during status poll, import any newly FINISHED steps.
+   * @param {object} payload GET /workflows/{id}/status body
+   * @returns {Promise<number>}
+   */
+  Composer._importNewlyFinishedTempGraphs = async function (payload) {
+    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+    const fresh = steps.filter((step) => {
+      const stepId = step?.step_id || step?.stepId;
+      if (!stepId || Composer._importedTempStepIds.has(stepId)) return false;
+      return String(step.scan_status || '').toUpperCase() === 'FINISHED';
+    });
+    if (!fresh.length) return 0;
+    const results = await Promise.all(
+      fresh.map((step) => Composer._importFinishedStepTempGraph(step))
+    );
+    return results.filter(Boolean).length;
   };
 
   /**
@@ -1019,6 +1053,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
 
       const runId = accepted.run_id || accepted.runId || '?';
+      Composer._importedTempStepIds = new Set();
       Composer.setStatus(
         `Workflow ${workflowId} running (run ${runId}) — live DAG status updating…`
       );
@@ -1039,6 +1074,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
             } else if (runErr && String(payload?.run_state || '') === 'error') {
               Composer.setStatus(`Workflow ${workflowId} error: ${runErr}`);
             }
+            // SPEC-016 B2 — import temp graphs as each step finishes.
+            Composer._importNewlyFinishedTempGraphs(payload).catch((err) => {
+              console.warn('Composer.runWorkflow incremental temp import', err);
+            });
           },
           onTerminal(payload) {
             if (settled) return;
