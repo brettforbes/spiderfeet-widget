@@ -36,6 +36,158 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer.OPTION_YAML_DEBOUNCE_MS = 200;
   /** True while AO2 full-workflow execute is in flight (R11-23). */
   Composer._workflowRunBusy = false;
+  /** SPEC-015 — single active status poller handle. */
+  Composer._statusPoller = null;
+  /** Poll interval for live DAG status (R15-14). */
+  Composer.STATUS_POLL_MS = 1000;
+  Composer.STATUS_POLL_MAX_BACKOFF_MS = 8000;
+  /** Terminal run_registry states from execute-async. */
+  Composer.TERMINAL_RUN_STATES = {
+    success: true,
+    error: true,
+    cancelled: true,
+  };
+
+  /**
+   * SPEC-015 §0.1 — backend scan_status → DAG UI state.
+   * @param {string|null|undefined} scanStatus
+   * @returns {'waiting'|'running'|'complete'|'failed'}
+   */
+  Composer.mapScanStatusToUi = function (scanStatus) {
+    const s = String(scanStatus || 'UNKNOWN').toUpperCase();
+    if (s === 'FINISHED') return 'complete';
+    if (s === 'ERROR-FAILED') return 'failed';
+    if (s === 'STARTING' || s === 'RUNNING') return 'running';
+    return 'waiting';
+  };
+
+  /**
+   * @param {{ steps?: Array<{step_id?: string, stepId?: string, scan_status?: string}> }|null|undefined} statusPayload
+   * @returns {Record<string, 'waiting'|'running'|'complete'|'failed'>}
+   */
+  Composer.statusPayloadToMap = function (statusPayload) {
+    const steps = Array.isArray(statusPayload?.steps) ? statusPayload.steps : [];
+    const map = {};
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      const stepId = step?.step_id || step?.stepId;
+      if (!stepId) continue;
+      map[String(stepId)] = Composer.mapScanStatusToUi(step.scan_status);
+    }
+    return map;
+  };
+
+  /** Stop the active status poller (R15-14 / R15-17). */
+  Composer.stopStatusPoller = function () {
+    const poller = Composer._statusPoller;
+    Composer._statusPoller = null;
+    if (!poller) return;
+    poller.stopped = true;
+    if (poller.timer) {
+      clearTimeout(poller.timer);
+      poller.timer = null;
+    }
+  };
+
+  /**
+   * Poll GET /workflows/{id}/status and forward setStepStatuses until terminal.
+   * @param {string} workflowId
+   * @param {{ onUpdate?: Function, onTerminal?: Function, onError?: Function }|null} [hooks]
+   * @returns {{ stop: Function }}
+   */
+  Composer.startStatusPoller = function (workflowId, hooks) {
+    Composer.stopStatusPoller();
+    const api = Widgets.SpiderfeetApi;
+    const wf = Widgets.ComposerWorkflow;
+    const poller = {
+      workflowId: String(workflowId),
+      stopped: false,
+      timer: null,
+      backoffMs: Composer.STATUS_POLL_MS,
+      hooks: hooks || {},
+    };
+    Composer._statusPoller = poller;
+
+    const schedule = (delay) => {
+      if (poller.stopped || Composer._statusPoller !== poller) return;
+      poller.timer = setTimeout(tick, delay);
+    };
+
+    const tick = async () => {
+      if (poller.stopped || Composer._statusPoller !== poller) return;
+      if (!api?.getWorkflowStatus) {
+        poller.hooks.onError?.(new Error('getWorkflowStatus unavailable'));
+        Composer.stopStatusPoller();
+        return;
+      }
+      try {
+        const payload = await api.getWorkflowStatus(poller.workflowId);
+        if (poller.stopped || Composer._statusPoller !== poller) return;
+        poller.backoffMs = Composer.STATUS_POLL_MS;
+        const map = Composer.statusPayloadToMap(payload);
+        wf?.setStepStatuses?.(map);
+        poller.hooks.onUpdate?.(payload, map);
+        const runState = payload?.run_state ? String(payload.run_state) : '';
+        if (runState && Composer.TERMINAL_RUN_STATES[runState]) {
+          const terminalHooks = poller.hooks;
+          Composer.stopStatusPoller();
+          terminalHooks.onTerminal?.(payload, map);
+          return;
+        }
+        schedule(Composer.STATUS_POLL_MS);
+      } catch (err) {
+        if (poller.stopped || Composer._statusPoller !== poller) return;
+        poller.hooks.onError?.(err);
+        poller.backoffMs = Math.min(
+          (poller.backoffMs || Composer.STATUS_POLL_MS) * 2,
+          Composer.STATUS_POLL_MAX_BACKOFF_MS
+        );
+        schedule(poller.backoffMs);
+      }
+    };
+
+    schedule(0);
+    return {
+      stop() {
+        if (Composer._statusPoller === poller) Composer.stopStatusPoller();
+      },
+    };
+  };
+
+  /**
+   * Build a temp-import-friendly result from a status payload after async completion.
+   * @param {string} workflowId
+   * @param {object} statusPayload
+   * @returns {object}
+   */
+  Composer._statusToExecuteResult = function (workflowId, statusPayload) {
+    const steps = Array.isArray(statusPayload?.steps) ? statusPayload.steps : [];
+    let succeeded = 0;
+    let failed = 0;
+    const mapped = steps.map((step) => {
+      const scanStatus = String(step.scan_status || 'UNKNOWN').toUpperCase();
+      const ok = scanStatus === 'FINISHED';
+      const err = scanStatus === 'ERROR-FAILED';
+      if (ok) succeeded += 1;
+      if (err) failed += 1;
+      return {
+        step_id: step.step_id,
+        scan_instance_id: step.scan_instance_id,
+        status: err ? 'error' : ok ? 'ok' : 'pending',
+        skipped: false,
+      };
+    });
+    return {
+      ok: failed === 0,
+      workflow_id: workflowId,
+      status: statusPayload?.run_state || 'done',
+      succeeded,
+      failed,
+      step_count: mapped.length,
+      steps: mapped,
+      message: `Workflow ${workflowId} ${statusPayload?.run_state || 'finished'}`,
+    };
+  };
 
   /**
    * R11-15 / AU2 — Scan Now enablement from editor validation only (no client guess).
@@ -671,7 +823,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * Run the full validated multi-step workflow (R11-23 / AV3).
+   * Run the full validated multi-step workflow (R11-23 / AV3 + SPEC-015 R15-14).
+   * Starts execute-async, polls status into the DAG, then imports temp graphs.
    * @returns {Promise<object|null>}
    */
   Composer.runWorkflow = async function () {
@@ -705,11 +858,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     const projectId = Composer.resolveProjectId();
     const api = Widgets.SpiderfeetApi;
-    if (!api?.executeWorkflow) {
-      Composer.setStatus('Run Workflow: SpiderfeetApi.executeWorkflow unavailable.');
+    if (!api?.executeWorkflowAsync || !api?.getWorkflowStatus) {
+      Composer.setStatus(
+        'Run Workflow: async status client unavailable (need executeWorkflowAsync + getWorkflowStatus).'
+      );
       return null;
     }
 
+    Composer.stopStatusPoller();
     Composer._workflowRunBusy = true;
     Composer.applyValidationToRunWorkflow(validation);
     Composer.setStatus(`Syncing workflow YAML for ${workflowId}…`);
@@ -723,36 +879,61 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         return null;
       }
 
-      Composer.setStatus(
-        sync.created
-          ? `Created workflow ${workflowId}; executing multi-step run…`
-          : `Executing multi-step workflow ${workflowId}…`
-      );
-
       const body = {};
       if (projectId) body.project_id = projectId;
-      const result = await api.executeWorkflow(workflowId, body);
+      Composer.setStatus(
+        sync.created
+          ? `Created workflow ${workflowId}; starting live run…`
+          : `Starting live workflow ${workflowId}…`
+      );
 
-      if (!result || result.ok === false) {
+      const accepted = await api.executeWorkflowAsync(workflowId, body);
+      if (!accepted || accepted.ok === false) {
         const msg =
-          result?.message ||
-          result?.detail ||
-          result?.error ||
-          'executeWorkflow failed';
+          accepted?.message ||
+          accepted?.detail ||
+          accepted?.error ||
+          'executeWorkflowAsync failed';
         Composer.setStatus(`Run Workflow failed: ${msg}`);
-        return result || null;
+        return accepted || null;
       }
 
-      const succeeded = result.succeeded != null ? result.succeeded : null;
-      const failed = result.failed != null ? result.failed : null;
-      const skipped = result.skipped != null ? result.skipped : null;
-      const stepCount =
-        result.step_count != null
-          ? result.step_count
-          : Array.isArray(result.steps)
-            ? result.steps.length
-            : null;
+      const runId = accepted.run_id || accepted.runId || '?';
+      Composer.setStatus(
+        `Workflow ${workflowId} running (run ${runId}) — live DAG status updating…`
+      );
 
+      const finalPayload = await new Promise((resolve, reject) => {
+        let settled = false;
+        Composer.startStatusPoller(workflowId, {
+          onUpdate(payload) {
+            const running = (payload?.steps || []).find((s) => {
+              const st = String(s.scan_status || '').toUpperCase();
+              return st === 'STARTING' || st === 'RUNNING';
+            });
+            if (running?.step_id) {
+              Composer.setStatus(
+                `Workflow ${workflowId}: ${running.step_id} running…`
+              );
+            }
+          },
+          onTerminal(payload) {
+            if (settled) return;
+            settled = true;
+            resolve(payload || {});
+          },
+          onError(err) {
+            console.warn('Composer.runWorkflow status poll', err);
+          },
+        });
+        // If startStatusPoller could not attach (no API), fail fast.
+        if (!Composer._statusPoller) {
+          settled = true;
+          reject(new Error('Failed to start status poller'));
+        }
+      });
+
+      const result = Composer._statusToExecuteResult(workflowId, finalPayload);
       let imported = 0;
       try {
         imported = await Composer._importWorkflowTempGraphs(result);
@@ -763,13 +944,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       const parts = [
         result.message || `Workflow ${workflowId} finished (${result.status || 'done'})`,
       ];
-      if (stepCount != null) {
-        parts.push(
-          `steps ${succeeded ?? '?'}/${stepCount}` +
-            (failed != null ? `, failed ${failed}` : '') +
-            (skipped != null ? `, skipped ${skipped}` : '')
-        );
-      }
+      parts.push(
+        `steps ${result.succeeded ?? '?'}/${result.step_count ?? '?'}` +
+          (result.failed != null ? `, failed ${result.failed}` : '')
+      );
       if (imported > 0) {
         parts.push(
           `Temporary viewer: +${imported} discrete subgraph${imported === 1 ? '' : 's'}`
@@ -778,6 +956,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       Composer.setStatus(parts.join(' · '));
       return result;
     } catch (err) {
+      Composer.stopStatusPoller();
       Composer.setStatus(
         `Run Workflow error: ${(err && err.message) || String(err)}`
       );
