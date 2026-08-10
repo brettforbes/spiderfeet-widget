@@ -15,8 +15,8 @@ Status mapping (backend `scan_status` → UI): `UNKNOWN`=waiting; `STARTING`/`RU
 |------|-------|-------------|------------|--------|
 | Epic C | [#231](https://github.com/brettforbes/spiderfeet-widget/issues/231) | R15-12..17 | Backend A1-A4, YAML B1 | in progress |
 | C1 — API client: async execute + getWorkflowStatus | [#232](https://github.com/brettforbes/spiderfeet-widget/issues/232) | R15-12 | Backend A1-A3 | done |
-| C2 — composer-workflow.js setStepStatuses bridge | [#233](https://github.com/brettforbes/spiderfeet-widget/issues/233) | R15-13 | YAML B1 | in review |
-| C3 — Run Workflow live polling + forwarding | [#234](https://github.com/brettforbes/spiderfeet-widget/issues/234) | R15-14 | C1, C2 | open |
+| C2 — composer-workflow.js setStepStatuses bridge | [#233](https://github.com/brettforbes/spiderfeet-widget/issues/233) | R15-13 | YAML B1 | done |
+| C3 — Run Workflow live polling + forwarding | [#234](https://github.com/brettforbes/spiderfeet-widget/issues/234) | R15-14 | C1, C2 | in review |
 | C4 — Scan Now live polling + forwarding | [#235](https://github.com/brettforbes/spiderfeet-widget/issues/235) | R15-15 | Backend A3, C2 | open |
 | C5 — Reset + project-switch status unwind/paint | [#236](https://github.com/brettforbes/spiderfeet-widget/issues/236) | R15-16 | Backend A4, C2 | open |
 | C6 — Poller lifecycle + status legend | [#237](https://github.com/brettforbes/spiderfeet-widget/issues/237) | R15-17 | C3 | open |
