@@ -310,6 +310,17 @@
             </ul>
           </div>
           <span class="small text-body-secondary me-auto d-none" id="composer-project-meta" aria-live="polite"></span>
+          <div
+            class="composer-status-legend d-flex align-items-center gap-2 small text-body-secondary me-1"
+            id="composer-status-legend"
+            title="Live workflow step status (DAG colors)"
+            aria-label="Workflow step status legend"
+          >
+            <span class="composer-status-swatch" data-status="waiting" title="Waiting">⏱</span>
+            <span class="composer-status-swatch" data-status="running" title="Running">↻</span>
+            <span class="composer-status-swatch" data-status="complete" title="Complete">✓</span>
+            <span class="composer-status-swatch" data-status="failed" title="Failed">✕</span>
+          </div>
           <button
             type="button"
             class="btn btn-sm btn-outline-secondary"
