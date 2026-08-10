@@ -1137,6 +1137,29 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
+   * SPEC-015 R15-17 — tear down the status poller when leaving Composer / unloading.
+   * New runs already call stop via startStatusPoller; this covers tab switch + page hide.
+   */
+  Composer._bindStatusPollerLifecycle = function () {
+    if (Composer._statusPollerLifecycleBound) return;
+    Composer._statusPollerLifecycleBound = true;
+
+    const onTabChanged = (event) => {
+      const tabId = event?.detail?.tabId;
+      if (tabId && tabId !== 'composer') {
+        Composer.stopStatusPoller();
+      }
+    };
+    const onPageHide = () => {
+      Composer.stopStatusPoller();
+    };
+
+    window.addEventListener('shell:tab-changed', onTabChanged);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onPageHide);
+  };
+
+  /**
    * Debounced CliScanApp option → editor YAML update (R11-14 / AU1).
    * @param {{ argv?: string[] }} snapshot
    */
@@ -1710,6 +1733,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer._bindEditModePersistListener();
     Composer._bindRunWorkflowButton();
     Composer._bindResetWorkflowButton();
+    Composer._bindStatusPollerLifecycle();
     Composer.setLeftState('partial');
     Composer.setRightOpen(false);
     Composer.setExpandedPane(null);
