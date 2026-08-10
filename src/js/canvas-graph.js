@@ -182,12 +182,14 @@
       const groups = [...new Set(nodes.map((n) => n.group))];
       const centres = new Map(
         groups.map((g, i) => {
-          const angle = (i / groups.length) * 2 * Math.PI;
+          const angle = (i / Math.max(groups.length, 1)) * 2 * Math.PI;
+          // SPEC-016 B3 — keep import clusters visibly separated.
+          const radius = 180;
           return [
             g,
             {
-              x: width / 2 + 120 * Math.cos(angle),
-              y: height / 2 + 120 * Math.sin(angle),
+              x: width / 2 + radius * Math.cos(angle),
+              y: height / 2 + radius * Math.sin(angle),
             },
           ];
         })
@@ -195,8 +197,8 @@
       simulation
         .force('link', d3.forceLink().id((n) => n.id).distance(50))
         .force('charge', d3.forceManyBody().strength(-250))
-        .force('x', d3.forceX((d) => centres.get(d.group).x).strength(0.12))
-        .force('y', d3.forceY((d) => centres.get(d.group).y).strength(0.12));
+        .force('x', d3.forceX((d) => centres.get(d.group)?.x ?? width / 2).strength(0.28))
+        .force('y', d3.forceY((d) => centres.get(d.group)?.y ?? height / 2).strength(0.28));
     },
   };
 
