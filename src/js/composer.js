@@ -36,8 +36,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer.OPTION_YAML_DEBOUNCE_MS = 200;
   /** True while AO2 full-workflow execute is in flight (R11-23). */
   Composer._workflowRunBusy = false;
+  /** SPEC-017 R17-10 — after a terminal run, Run stays off until Reset succeeds. */
+  Composer._runBlockedUntilReset = false;
   /** True while Reset Workflow is in flight (SPEC-015 R15-16). */
   Composer._workflowResetBusy = false;
+  /** SPEC-017 R17-10 — Run locked after terminal workflow run until Reset. */
+  Composer._runLockedUntilReset = false;
   /** SPEC-015 — single active status poller handle. */
   Composer._statusPoller = null;
   /** SPEC-017 B2 — step ids that already triggered a temp list re-GET this run. */
@@ -255,6 +259,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         if (runState && Composer.TERMINAL_RUN_STATES[runState]) {
           const terminalHooks = poller.hooks;
           Composer.stopStatusPoller();
+          Composer.applyRunLockFromStatus(payload);
           terminalHooks.onTerminal?.(payload, map);
           return;
         }
@@ -326,13 +331,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * R11-23 / AV3 — Run Workflow enablement from editor validation only.
-   * Disabled while a full-workflow run is in flight.
+   * R11-23 / AV3 / SPEC-017 R17-10 — Run Workflow enablement.
+   * Disabled while a full-workflow run is in flight, or after a terminal run
+   * until Reset Workflow succeeds.
    * @param {{ ok?: boolean }|null|undefined} validation
    * @returns {boolean}
    */
   Composer.workflowRunEnabledFromValidation = function (validation) {
     if (Composer._workflowRunBusy) return false;
+    if (Composer._runBlockedUntilReset) return false;
     return !!(validation && validation.ok);
   };
 
@@ -709,6 +716,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (Composer._workflowRunBusy) {
       btn.textContent = 'Running…';
       btn.title = 'Full workflow execute in progress';
+    } else if (Composer._runBlockedUntilReset) {
+      btn.textContent = 'Run Workflow';
+      btn.title = 'Disabled until Reset Workflow clears scan results';
     } else {
       btn.textContent = 'Run Workflow';
       btn.title = enabled
@@ -959,6 +969,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    */
   Composer.runWorkflow = async function () {
     if (Composer._workflowRunBusy) return null;
+    if (Composer._runBlockedUntilReset) {
+      Composer.setStatus(
+        'Run Workflow disabled — press Reset Workflow before starting another run.'
+      );
+      return null;
+    }
 
     const validation =
       Widgets.ComposerWorkflow?.getLastValidation?.() ||
@@ -1101,15 +1117,19 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         );
       }
       Composer.setStatus(parts.join(' · '));
+      // SPEC-017 R17-10 — require Reset before another Run.
+      Composer._runBlockedUntilReset = true;
       return result;
     } catch (err) {
       Composer.stopStatusPoller();
       Composer.setStatus(
         `Run Workflow error: ${(err && err.message) || String(err)}`
       );
+      Composer._runBlockedUntilReset = true;
       return null;
     } finally {
       Composer._workflowRunBusy = false;
+      Composer.applyRunLockFromStatus(finalPayload);
       const last =
         Widgets.ComposerWorkflow?.getLastValidation?.() ||
         Widgets.ComposerWorkflow?._lastValidation ||
@@ -1287,6 +1307,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
       // Backend rematerialized UNKNOWN shells — paint waiting for all steps.
       await Composer.paintWorkflowStatuses(workflowId);
+
+      // SPEC-017 R17-10 — Reset re-enables Run (backend returns run_ready).
+      Composer._runBlockedUntilReset = false;
+      const lastVal =
+        Widgets.ComposerWorkflow?.getLastValidation?.() ||
+        Widgets.ComposerWorkflow?._lastValidation ||
+        null;
+      Composer.applyValidationToRunWorkflow(lastVal);
 
       const steps = result.steps_reset != null ? result.steps_reset : '?';
       Composer.setStatus(
