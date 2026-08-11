@@ -40,8 +40,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._workflowResetBusy = false;
   /** SPEC-015 — single active status poller handle. */
   Composer._statusPoller = null;
-  /** SPEC-016 B2 — step ids already imported into the temp viewer this run. */
-  Composer._importedTempStepIds = new Set();
+  /** SPEC-017 B2 — step ids that already triggered a temp list re-GET this run. */
+  Composer._reloadedTempStepIds = new Set();
+  /** In-flight guard for coalesced temporary-context reloads. */
+  Composer._tempListReloadPromise = null;
   /** Poll interval for live DAG status (R15-14). */
   Composer.STATUS_POLL_MS = 1000;
   Composer.STATUS_POLL_MAX_BACKOFF_MS = 8000;
@@ -641,7 +643,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
   /**
    * Surface execute outcomes on Composer status (stub/errors stay visible).
-   * On complete + context.export scan_graph, AW1 imports into Temporary Subgraph Viewer.
+   * On complete, re-GET temporary subgraph list (SPEC-017 B2).
    * @param {{ ok?: boolean, kind?: string, message?: string, detail?: object }} outcome
    */
   Composer._onCliScanComplete = function (outcome) {
@@ -654,18 +656,11 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       if (Composer._cliScanApp?.setRunEnabled) {
         Composer._cliScanApp.setRunEnabled(false);
       }
-      if (Widgets.ComposerTempGraph?.handleScanComplete) {
-        try {
-          const imported = Widgets.ComposerTempGraph.handleScanComplete(outcome, {
-            stepId: Composer._selectedStepId,
-          });
-          if (imported?.subgraphId) {
-            const n = Widgets.ComposerTempGraph.getSubgraphs?.()?.length || 0;
-            message = `${message} Temporary viewer: +1 discrete subgraph (${n} total).`;
-          }
-        } catch (err) {
-          console.warn('ComposerTempGraph.handleScanComplete failed', err);
-        }
+      const pid = Composer.resolveProjectId();
+      if (pid && Widgets.ComposerTempGraph?.loadFromServer) {
+        Widgets.ComposerTempGraph.loadFromServer(pid).catch((err) => {
+          console.warn('Composer._onCliScanComplete temp reload', err);
+        });
       }
     }
     Composer.setStatus(message);
@@ -898,82 +893,63 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   };
 
   /**
-   * SPEC-016 B2 — import one FINISHED step into the temp viewer (deduped by step id).
-   * @param {object} step
+   * SPEC-017 B2 — re-GET project temporary list from the server (read-only viewer).
+   * @param {string} [projectId]
+   * @param {{ reason?: string }} [opts]
+   * @returns {Promise<{ ok: boolean, subgraphCount?: number }|null>}
+   */
+  Composer.reloadTemporaryContextFromServer = async function (projectId, opts) {
+    const pid = projectId || Composer.resolveProjectId();
+    if (!pid) return null;
+    const temp = Widgets.ComposerTempGraph;
+    if (!temp?.loadFromServer) return null;
+
+    if (Composer._tempListReloadPromise) {
+      return Composer._tempListReloadPromise;
+    }
+
+    Composer._tempListReloadPromise = temp
+      .loadFromServer(pid)
+      .then((result) => {
+        if (result?.ok) {
+          const n = result.subgraphCount != null ? result.subgraphCount : '?';
+          const reason = opts?.reason ? ` (${opts.reason})` : '';
+          Composer.setStatus?.(
+            `Temporary subgraphs reloaded${reason}: ${n} subgraph${n === 1 ? '' : 's'}.`
+          );
+        }
+        return result;
+      })
+      .catch((err) => {
+        console.warn('Composer.reloadTemporaryContextFromServer', err);
+        return { ok: false, message: (err && err.message) || String(err) };
+      })
+      .finally(() => {
+        Composer._tempListReloadPromise = null;
+      });
+
+    return Composer._tempListReloadPromise;
+  };
+
+  /**
+   * SPEC-017 B2 — on newly FINISHED steps during poll, re-GET temp list (no client-merge).
+   * @param {object} payload GET /workflows/{id}/status body
    * @returns {Promise<boolean>}
    */
-  Composer._importFinishedStepTempGraph = async function (step) {
-    const api = Widgets.SpiderfeetApi;
-    const temp = Widgets.ComposerTempGraph;
-    if (!temp?.handleScanComplete || !api || !step) return false;
-    if (step.skipped || step.status === 'error') return false;
-    const stepId = step.step_id || step.stepId;
-    if (!stepId) return false;
-    const scanStatus = String(step.scan_status || '').toUpperCase();
-    if (scanStatus && scanStatus !== 'FINISHED') return false;
-    if (Composer._importedTempStepIds.has(stepId)) return false;
-
-    let detail = null;
-    const scanInstanceId = step.scan_instance_id || step.scanInstanceId;
-    if (scanInstanceId && api.getScanStep) {
-      try {
-        const payload = await api.getScanStep(scanInstanceId);
-        if (payload && payload.ok !== false && api.scanStepToDetail) {
-          detail = api.scanStepToDetail(payload);
-        }
-      } catch (err) {
-        console.warn('Composer._importFinishedStepTempGraph getScanStep', err);
-      }
-    }
-
-    const outcome = {
-      ok: true,
-      kind: 'complete',
-      detail: detail || null,
-      result: detail || step,
-    };
-    try {
-      const hit = temp.handleScanComplete(outcome, { stepId });
-      // Mark imported even when export:none so we do not re-fetch forever.
-      Composer._importedTempStepIds.add(stepId);
-      return Boolean(hit?.subgraphId);
-    } catch (err) {
-      console.warn('Composer._importFinishedStepTempGraph import', err);
-      return false;
-    }
-  };
-
-  /**
-   * After AO2 completes (and as a terminal catch-up), import scan_graph exports.
-   * @param {object} result executeWorkflow response
-   * @returns {Promise<number>} number of discrete imports
-   */
-  Composer._importWorkflowTempGraphs = async function (result) {
-    const steps = Array.isArray(result?.steps) ? result.steps : [];
-    if (!steps.length) return 0;
-    const results = await Promise.all(
-      steps.map((step) => Composer._importFinishedStepTempGraph(step))
-    );
-    return results.filter(Boolean).length;
-  };
-
-  /**
-   * SPEC-016 B2 — during status poll, import any newly FINISHED steps.
-   * @param {object} payload GET /workflows/{id}/status body
-   * @returns {Promise<number>}
-   */
-  Composer._importNewlyFinishedTempGraphs = async function (payload) {
+  Composer._reloadTemporaryContextIfNewFinished = async function (payload) {
     const steps = Array.isArray(payload?.steps) ? payload.steps : [];
     const fresh = steps.filter((step) => {
       const stepId = step?.step_id || step?.stepId;
-      if (!stepId || Composer._importedTempStepIds.has(stepId)) return false;
+      if (!stepId || Composer._reloadedTempStepIds.has(stepId)) return false;
       return String(step.scan_status || '').toUpperCase() === 'FINISHED';
     });
-    if (!fresh.length) return 0;
-    const results = await Promise.all(
-      fresh.map((step) => Composer._importFinishedStepTempGraph(step))
-    );
-    return results.filter(Boolean).length;
+    if (!fresh.length) return false;
+    fresh.forEach((step) => {
+      const stepId = step.step_id || step.stepId;
+      if (stepId) Composer._reloadedTempStepIds.add(String(stepId));
+    });
+    await Composer.reloadTemporaryContextFromServer(null, { reason: 'step FINISHED' });
+    return true;
   };
 
   /**
@@ -1053,7 +1029,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       }
 
       const runId = accepted.run_id || accepted.runId || '?';
-      Composer._importedTempStepIds = new Set();
+      Composer._reloadedTempStepIds = new Set();
       Composer.setStatus(
         `Workflow ${workflowId} running (run ${runId}) — live DAG status updating…`
       );
@@ -1074,9 +1050,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
             } else if (runErr && String(payload?.run_state || '') === 'error') {
               Composer.setStatus(`Workflow ${workflowId} error: ${runErr}`);
             }
-            // SPEC-016 B2 — import temp graphs as each step finishes.
-            Composer._importNewlyFinishedTempGraphs(payload).catch((err) => {
-              console.warn('Composer.runWorkflow incremental temp import', err);
+            // SPEC-017 B2 — re-GET temp list as each step finishes.
+            Composer._reloadTemporaryContextIfNewFinished(payload).catch((err) => {
+              console.warn('Composer.runWorkflow incremental temp reload', err);
             });
           },
           onTerminal(payload) {
@@ -1096,11 +1072,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       });
 
       const result = Composer._statusToExecuteResult(workflowId, finalPayload);
-      let imported = 0;
+      let subgraphCount = null;
       try {
-        imported = await Composer._importWorkflowTempGraphs(result);
+        const reload = await Composer.reloadTemporaryContextFromServer(projectId, {
+          reason: 'workflow terminal',
+        });
+        if (reload?.ok && reload.subgraphCount != null) {
+          subgraphCount = reload.subgraphCount;
+        }
       } catch (err) {
-        console.warn('Composer.runWorkflow temp import', err);
+        console.warn('Composer.runWorkflow terminal temp reload', err);
       }
 
       const runErr = finalPayload?.error ? String(finalPayload.error) : '';
@@ -1114,9 +1095,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         `steps ${result.succeeded ?? '?'}/${result.step_count ?? '?'}` +
           (result.failed != null ? `, failed ${result.failed}` : '')
       );
-      if (imported > 0) {
+      if (subgraphCount != null && subgraphCount > 0) {
         parts.push(
-          `Temporary viewer: +${imported} discrete subgraph${imported === 1 ? '' : 's'}`
+          `Temporary viewer: ${subgraphCount} subgraph${subgraphCount === 1 ? '' : 's'}`
         );
       }
       Composer.setStatus(parts.join(' · '));
@@ -1225,7 +1206,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       temp?.clear?.();
       return { ok: false, message: 'ComposerTempGraph.loadFromServer unavailable' };
     }
-    Composer._importedTempStepIds = new Set();
+    Composer._reloadedTempStepIds = new Set();
     const result = await temp.loadFromServer(pid);
     if (result?.ok) {
       const parts = [`Loaded temporary context for ${pid}`];
