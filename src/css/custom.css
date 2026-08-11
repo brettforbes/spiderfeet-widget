@@ -97,9 +97,34 @@ body {
 
 .navbar-brand-logo {
   display: block;
-  height: 4rem;
+  height: 2.5rem;
   width: auto;
-  max-width: 21rem;
+  max-width: 14rem;
+}
+
+/* R13-11 — navbar auto-hide (slide up; top-edge / keyboard reveal) */
+#widget-root > .app-header {
+  position: relative;
+  z-index: 1030;
+  flex-shrink: 0;
+  transition: transform 0.25s ease, margin-top 0.25s ease;
+  will-change: transform;
+}
+
+#widget-root.app-header-hidden > .app-header {
+  transform: translateY(-100%);
+  margin-top: calc(-1 * var(--app-header-height, 3rem));
+  pointer-events: none;
+}
+
+#widget-root.app-header-hidden > .app-header:focus-within {
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #widget-root > .app-header {
+    transition: none;
+  }
 }
 
 #viz-stage .viz-layer {
@@ -395,6 +420,23 @@ body {
 .cli-scan-command-palette [data-cli-scan-run][disabled] {
   opacity: 0.85;
   cursor: not-allowed;
+}
+
+/* R11-13 / AT2 — unset step: lock Text|Structured|Graph|Report */
+.cli-scan-tabs .nav-link.disabled,
+.cli-scan-outputs-locked .cli-scan-tabs .nav-link.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* Beat `.tab-content > .tab-pane.active.show { overflow: hidden }` so
+   Text / Report can scroll their long content inside CliScanApp. */
+.cli-scan-tab-content > .tab-pane.cli-scan-pane-scroll.active.show {
+  display: block !important;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto !important;
 }
 
 .cli-scan-pane-scroll {
@@ -838,4 +880,183 @@ body {
 
 .profiling-markdown-doc pre.mermaid-fallback {
   margin: 1.25rem 0;
+}
+
+/* SPEC-015 R15-17 — Composer chrome status legend (matches DAG glyphs). */
+.composer-status-legend .composer-status-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  line-height: 1;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+.composer-status-legend .composer-status-swatch[data-status='waiting'] {
+  background: #cfe2ff;
+  color: #084298;
+}
+.composer-status-legend .composer-status-swatch[data-status='running'] {
+  background: #6ea8fe;
+  color: #052c65;
+}
+.composer-status-legend .composer-status-swatch[data-status='complete'] {
+  background: #0d6efd;
+  color: #fff;
+}
+.composer-status-legend .composer-status-swatch[data-status='failed'] {
+  background: #dc3545;
+  color: #fff;
+}
+
+/* SPEC-011 AR1 — Composer 4-region layout (12-column left/right model) */
+.composer-workspace {
+  min-height: 0;
+}
+
+.composer-left,
+.composer-center {
+  min-height: 0;
+  min-width: 0;
+}
+
+.composer-left-rail {
+  width: 2.25rem;
+}
+
+.composer-left-rail-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+.composer-region-toolbar {
+  min-height: 2.25rem;
+}
+
+.composer-viewer {
+  flex-basis: 0;
+  min-height: 0;
+}
+
+/* SPEC-011 AR2 / R11-07 — central pane full-screen expand within the center column */
+.composer-center.composer-center-expanded .composer-viewer-expanded {
+  flex-grow: 1;
+  flex-basis: auto;
+  min-height: 0;
+  border-bottom: 0 !important;
+}
+
+.composer-center.composer-center-expanded .composer-viewer-collapsed-by-expand {
+  display: none !important;
+}
+
+.composer-viewer-stage {
+  min-height: 0;
+}
+
+/* SPEC-011 AW2 / R11-19 — discrete import chips with remove toggles */
+.composer-temp-subgraph-list {
+  max-height: 4.5rem;
+  overflow-y: auto;
+}
+
+.composer-temp-subgraph-chip {
+  max-width: 100%;
+}
+
+.composer-viewer-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.composer-yaml-slot,
+.composer-cliscan-slot {
+  min-height: 0;
+}
+
+/* AT1 — CliScanApp fills the right slide-in slot */
+.composer-cliscan-slot > .cli-scan-app {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Composer slide-in: options fill cols 4–10; rail ≈2 cols; vertical scroll for options */
+.cli-scan-app--composer .cli-scan-scan-layout--composer {
+  flex-wrap: nowrap;
+}
+
+.cli-scan-app--composer .cli-scan-form-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.cli-scan-app--composer .cli-scan-rail {
+  flex: 0 0 10.5rem;
+  width: 10.5rem;
+  max-width: 12rem;
+}
+
+.cli-scan-app--composer .cli-opt-section-cols-3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* SPEC-011 AS1 / R11-09 — yaml-workflow-widget iframe fills left column */
+.composer-yaml-slot {
+  position: relative;
+}
+
+.composer-workflow-iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: block;
+  background: transparent;
+}
+
+/* Right slide-in covers Bootstrap columns 4–12 (75%) when left is partial; full width when left collapsed */
+.composer-right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 75%;
+  z-index: 4;
+  box-shadow: -0.25rem 0 0.75rem rgba(0, 0, 0, 0.08);
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+
+.composer-right.composer-right-open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+#composer-workspace[data-composer-left-state='collapsed'] .composer-right {
+  width: calc(100% - 2.25rem);
+}
+
+#composer-workspace[data-composer-left-state='partial'] .composer-right {
+  width: 75%;
+}
+
+#composer-workspace[data-composer-left-state='full'] .composer-right {
+  display: none;
 }

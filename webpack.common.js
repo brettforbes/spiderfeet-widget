@@ -156,10 +156,18 @@ module.exports = {
                 paths.src + '/js/_namespace.js',
                 paths.src + '/js/#events.js',
                 paths.src + '/js/connection.js',
-                paths.src + '/js/shell.js',
-                paths.src + '/js/theme.js',
+                paths.src + '/js/spiderfeet-api.js',
+                paths.src + '/js/projects.js',
+                // Viz before Composer — Composer AR3 mounts CanvasGraph at init (deferred widget.js).
                 paths.src + '/js/viz.core.js',
                 paths.src + '/js/canvas-graph.js',
+                // AS1 before Composer so deferred initPanel can mount the YAML iframe.
+                paths.src + '/js/composer-workflow.js',
+                paths.src + '/js/composer.js',
+                // AW1 — Temporary Subgraph Viewer import (needs Composer.mountCanvasGraph).
+                paths.src + '/js/composer-temp-graph.js',
+                paths.src + '/js/shell.js',
+                paths.src + '/js/theme.js',
                 paths.src + '/js/graph-shadows.js',
                 paths.src + '/js/map.js',
                 paths.src + '/js/subscriptions.js',

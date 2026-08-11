@@ -182,12 +182,14 @@
       const groups = [...new Set(nodes.map((n) => n.group))];
       const centres = new Map(
         groups.map((g, i) => {
-          const angle = (i / groups.length) * 2 * Math.PI;
+          const angle = (i / Math.max(groups.length, 1)) * 2 * Math.PI;
+          // SPEC-016 B3 — keep import clusters visibly separated.
+          const radius = 180;
           return [
             g,
             {
-              x: width / 2 + 120 * Math.cos(angle),
-              y: height / 2 + 120 * Math.sin(angle),
+              x: width / 2 + radius * Math.cos(angle),
+              y: height / 2 + radius * Math.sin(angle),
             },
           ];
         })
@@ -195,8 +197,8 @@
       simulation
         .force('link', d3.forceLink().id((n) => n.id).distance(50))
         .force('charge', d3.forceManyBody().strength(-250))
-        .force('x', d3.forceX((d) => centres.get(d.group).x).strength(0.12))
-        .force('y', d3.forceY((d) => centres.get(d.group).y).strength(0.12));
+        .force('x', d3.forceX((d) => centres.get(d.group)?.x ?? width / 2).strength(0.28))
+        .force('y', d3.forceY((d) => centres.get(d.group)?.y ?? height / 2).strength(0.28));
     },
   };
 
@@ -761,6 +763,45 @@
         },
         getTransform() {
           return transform;
+        },
+        /**
+         * SPEC-016 B4 — fit/centre the view on the given node ids (graph coords).
+         * @param {string[]|Set<string>} nodeIds
+         * @param {{ padding?: number }} [opts]
+         * @returns {boolean}
+         */
+        centerOnNodes(nodeIds, opts) {
+          const idSet = nodeIds instanceof Set ? nodeIds : new Set(nodeIds || []);
+          if (!idSet.size) return false;
+          const selected = nodes.filter((n) => idSet.has(n.id));
+          if (!selected.length) return false;
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          selected.forEach((n) => {
+            const r = (n.iconSize || n.r || 10) / 2;
+            if (n.x - r < minX) minX = n.x - r;
+            if (n.y - r < minY) minY = n.y - r;
+            if (n.x + r > maxX) maxX = n.x + r;
+            if (n.y + r > maxY) maxY = n.y + r;
+          });
+          if (!Number.isFinite(minX) || !Number.isFinite(minY)) return false;
+          const pad = opts?.padding != null ? Number(opts.padding) : 48;
+          const bw = Math.max(maxX - minX, 1);
+          const bh = Math.max(maxY - minY, 1);
+          const scale = Math.max(
+            0.2,
+            Math.min(8, Math.min((width - pad * 2) / bw, (height - pad * 2) / bh))
+          );
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+          const next = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(scale)
+            .translate(-cx, -cy);
+          canvasSel.transition().duration(350).call(zoom.transform, next);
+          return true;
         },
         pinNode,
         unpinNode,

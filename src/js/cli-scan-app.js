@@ -11,13 +11,22 @@
  *     mode: 'view' | 'edit-run',   // view = read-only examination; edit-run = live form
  *     scenarioKey: 'capstone_…',   // optional label
  *     detail: scenarioDetail,      // optional examination payload (text/structured/graph/md)
+ *                                 // detail.argv (string[]) seeds the form from workflow config.argv
+ *     hasRun: false,               // R11-13: false locks Text/Structured/Graph/Report
+ *     runEnabled: false,           // R11-13/AU2: false keeps Scan Now disabled in edit-run
+ *     executeContext: {            // R11-16 / AV1: Scan Now → SpiderfeetApi.executeStep
+ *       workflowId, stepId, projectId?,
+ *     },
+ *     onOptionsChange: (snap) => {}, // edit-run: fires when options change ({ argv, values, toolId })
+ *     onScanComplete: (result) => {}, // after execute (ok / stub / error)
  *     instanceId: 'my-scan',       // optional; unique per concurrent mount
  *     dataSource: {
  *       contentBase: '/content',   // options-schema + markdown docs
  *       corpusBase: '/cli-corpus', // unused by component today; reserved for hosts
  *     },
  *   });
- *   // later: app.reload({ toolId, detail, mode }); app.destroy();
+ *   // later: app.reload({ toolId, detail, mode, hasRun, runEnabled, executeContext, onOptionsChange });
+ *   //        app.setHasRun(true); app.setRunEnabled(true); app.runScanNow(); app.getArgvTokens(); app.destroy();
  *
  * Host pages own chrome around the mount. Graph fullscreen toggles
  * `.profiling-graph-host-fullscreen` on `container` so any host can style it.
@@ -69,6 +78,41 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       .replace(/"/g, '&quot;');
   }
 
+
+  /** True when examination/run detail carries any of the four output forms. */
+  CliScanApp._detailHasRun = function (detail) {
+    if (!detail || typeof detail !== 'object') return false;
+    if (detail.output_text) return true;
+    if (detail.narrative_markdown) return true;
+    if (detail.graph_proposal && (detail.graph_proposal.nodes?.length || detail.graph_proposal.links?.length)) {
+      return true;
+    }
+    const structured = detail.structured;
+    if (structured == null) return false;
+    if (typeof structured === 'string') return structured.length > 0;
+    if (typeof structured === 'object') {
+      if (structured.content != null && structured.content !== '') return true;
+      if (Object.keys(structured).length > 0) return true;
+    }
+    return false;
+  };
+
+  CliScanApp._resolveHasRun = function (config, detail) {
+    if (config && Object.prototype.hasOwnProperty.call(config, 'hasRun')) {
+      return Boolean(config.hasRun);
+    }
+    return CliScanApp._detailHasRun(detail);
+  };
+
+  CliScanApp._resolveRunEnabled = function (config, mode, hasRun) {
+    if (config && Object.prototype.hasOwnProperty.call(config, 'runEnabled')) {
+      return Boolean(config.runEnabled);
+    }
+    // Unset edit-run steps keep Scan Now off until a host (AU2) enables it.
+    if (mode === 'edit-run' && !hasRun) return false;
+    return mode === 'edit-run';
+  };
+
   CliScanApp.create = function (config) {
     const container = config.container;
     if (!container) throw new Error('CliScanApp.create requires container');
@@ -78,12 +122,21 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const contentBase = config.dataSource?.contentBase || '/content';
     const corpusBase = config.dataSource?.corpusBase || '/cli-corpus';
 
+    const detail = config.detail || null;
+    const hasRun = CliScanApp._resolveHasRun(config, detail);
+    const runEnabled = CliScanApp._resolveRunEnabled(config, mode, hasRun);
+
     const state = {
       instanceId,
       mode,
       toolId: config.toolId || '',
       scenarioKey: config.scenarioKey || null,
-      detail: config.detail || null,
+      detail,
+      hasRun,
+      runEnabled,
+      executeContext: CliScanApp._normalizeExecuteContext(config.executeContext),
+      onOptionsChange: typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null,
+      onScanComplete: typeof config.onScanComplete === 'function' ? config.onScanComplete : null,
       contentBase,
       corpusBase,
       schema: null,
@@ -98,13 +151,26 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       priorExamTab: null,
       viewer: null,
       frameId: `data-viewer-${instanceId}`,
+      executing: false,
     };
 
     state.container = container;
+    state.modalEl = null;
+    state.layout =
+      config.layout ||
+      (container.closest?.('.composer-cliscan-slot') || container.classList?.contains('composer-cliscan-slot')
+        ? 'composer'
+        : 'default');
     container.innerHTML = CliScanApp._shellHtml(state);
+    if (state.layout === 'composer') {
+      container.querySelector('.cli-scan-app')?.classList.add('cli-scan-app--composer');
+    }
+    // Park doc modals on body immediately (Composer transform/overflow stacking).
+    CliScanApp._ensureModalOnBody(container, state);
     CliScanApp._instances.set(instanceId, state);
     CliScanApp._wireTabs(container, state);
     CliScanApp._wireRail(container, state);
+    CliScanApp._syncOutputTabs(container, state);
     CliScanApp.load(state, config).catch((err) => {
       console.error('CliScanApp.load failed', err);
       CliScanApp._setStatus(container, state, err.message);
@@ -112,7 +178,34 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     return {
       instanceId,
       reload: (next) => CliScanApp.load(state, next),
+      setHasRun: (next) => CliScanApp.setHasRun(state, next),
+      setRunEnabled: (next) => CliScanApp.setRunEnabled(state, next),
+      setExecuteContext: (ctx) => {
+        state.executeContext = CliScanApp._normalizeExecuteContext(ctx);
+        CliScanApp._syncRunButton(state.container, state);
+      },
+      runScanNow: () => CliScanApp.runScanNow(state),
+      getArgvTokens: () => CliScanApp.buildArgvTokens(state),
+      setOnOptionsChange: (fn) => {
+        state.onOptionsChange = typeof fn === 'function' ? fn : null;
+      },
+      setOnScanComplete: (fn) => {
+        state.onScanComplete = typeof fn === 'function' ? fn : null;
+      },
       destroy: () => CliScanApp.destroy(state),
+    };
+  };
+
+  CliScanApp._normalizeExecuteContext = function (ctx) {
+    if (!ctx || typeof ctx !== 'object') return null;
+    const workflowId = String(ctx.workflowId || ctx.workflow_id || '').trim();
+    const stepId = String(ctx.stepId || ctx.step_id || '').trim();
+    if (!workflowId || !stepId) return null;
+    const projectId = String(ctx.projectId || ctx.project_id || '').trim();
+    return {
+      workflowId,
+      stepId,
+      projectId: projectId || null,
     };
   };
 
@@ -129,8 +222,22 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
       window.removeEventListener('shell:theme-changed', state._themeChangedListener);
       state._themeChangedListener = null;
     }
-    (state._tabListeners || []).forEach(({ tab, fn }) => tab.removeEventListener('shown.bs.tab', fn));
+    (state._tabListeners || []).forEach(({ tab, fn, type }) => {
+      tab.removeEventListener(type || 'shown.bs.tab', fn);
+    });
     state._tabListeners = [];
+    const modalEl =
+      state.modalEl ||
+      document.querySelector(`[data-cli-scan-modal="${state.instanceId}"]`);
+    if (modalEl) {
+      try {
+        window.bootstrap?.Modal.getInstance(modalEl)?.dispose();
+      } catch (_err) {
+        /* ignore */
+      }
+      modalEl.remove();
+      state.modalEl = null;
+    }
     state._destroyed = true;
     CliScanApp._instances.delete(state.instanceId);
   };
@@ -139,9 +246,20 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     const container = state.container || document.querySelector(`[data-cli-scan-id="${state.instanceId}"]`);
     state.container = container;
     if (config.toolId) state.toolId = config.toolId;
-    if (config.scenarioKey) state.scenarioKey = config.scenarioKey;
-    if (config.detail) state.detail = config.detail;
+    if (config.scenarioKey !== undefined) state.scenarioKey = config.scenarioKey;
+    if (Object.prototype.hasOwnProperty.call(config, 'detail')) state.detail = config.detail || null;
     if (config.mode) state.mode = config.mode === 'edit-run' ? 'edit-run' : 'view';
+    state.hasRun = CliScanApp._resolveHasRun(config, state.detail);
+    state.runEnabled = CliScanApp._resolveRunEnabled(config, state.mode, state.hasRun);
+    if (Object.prototype.hasOwnProperty.call(config, 'executeContext')) {
+      state.executeContext = CliScanApp._normalizeExecuteContext(config.executeContext);
+    }
+    if (Object.prototype.hasOwnProperty.call(config, 'onOptionsChange')) {
+      state.onOptionsChange = typeof config.onOptionsChange === 'function' ? config.onOptionsChange : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(config, 'onScanComplete')) {
+      state.onScanComplete = typeof config.onScanComplete === 'function' ? config.onScanComplete : null;
+    }
 
     CliScanApp._setStatus(container, state, `Loading ${state.toolId}…`);
 
@@ -170,15 +288,376 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     state.values = initial.values;
     state.rows = initial.rows;
 
+    CliScanApp._syncOutputTabs(container, state);
     CliScanApp._syncRunButton(container, state);
     CliScanApp._renderScanForm(container, state);
     CliScanApp._updateCommandPreview(container, state);
 
-    if (state.detail) {
+    if (state.detail && state.hasRun) {
       CliScanApp._renderOutputs(container, state);
     }
 
-    CliScanApp._setStatus(container, state, `Ready — ${state.toolId}${state.scenarioKey ? ` / ${state.scenarioKey}` : ''}`);
+    const unsetHint =
+      state.mode === 'edit-run' && !state.hasRun
+        ? ' — unset step: options editable; output tabs locked; Scan Now disabled'
+        : '';
+    CliScanApp._setStatus(
+      container,
+      state,
+      `Ready — ${state.toolId}${state.scenarioKey ? ` / ${state.scenarioKey}` : ''}${unsetHint}`
+    );
+  };
+
+  /** R11-13 — unlock/lock Text|Structured|Graph|Report after a run exists. */
+  CliScanApp.setHasRun = function (state, hasRun) {
+    state.hasRun = Boolean(hasRun);
+    const container = state.container;
+    if (!container) return;
+    CliScanApp._syncOutputTabs(container, state);
+    if (!state.hasRun && state.mode === 'edit-run' && !state._runEnabledPinned) {
+      state.runEnabled = false;
+      CliScanApp._syncRunButton(container, state);
+    }
+  };
+
+  /** Composer AU2 calls this when editor `validationResult.ok` changes (R11-15). */
+  CliScanApp.setRunEnabled = function (state, runEnabled) {
+    state.runEnabled = Boolean(runEnabled);
+    state._runEnabledPinned = true;
+    const container = state.container;
+    if (!container) return;
+    CliScanApp._syncRunButton(container, state);
+  };
+
+  /**
+   * Map SPEC-010 scan-step / execute payload → CliScanApp detail (R11-16).
+   * Prefers Widgets.SpiderfeetApi.scanStepToDetail when available.
+   */
+  CliScanApp.detailFromScanStep = function (payload) {
+    const api = Widgets.SpiderfeetApi;
+    if (api && typeof api.scanStepToDetail === 'function') {
+      return api.scanStepToDetail(payload);
+    }
+    return null;
+  };
+
+  /**
+   * Apply a completed run's four forms into the UI (unlock tabs + render).
+   * @param {object} state
+   * @param {object} detail
+   * @param {{ keepArgv?: boolean }} [opts]
+   */
+  CliScanApp.applyRunDetail = async function (state, detail, opts) {
+    const container = state.container;
+    if (!container || !detail) return;
+    const next = Object.assign({}, detail);
+    if (opts?.keepArgv !== false) {
+      const argv = CliScanApp.buildArgvTokens(state);
+      if (argv.length && !Array.isArray(next.argv)) next.argv = argv;
+      const preview = container.querySelector('[data-cli-scan-command]')?.textContent;
+      if (preview && !next.command) next.command = preview;
+    }
+    state.detail = next;
+    state.hasRun = true;
+    CliScanApp._syncOutputTabs(container, state);
+    CliScanApp._syncRunButton(container, state);
+    await CliScanApp._renderOutputs(container, state);
+  };
+
+  /**
+   * R11-16 / AV1 — Scan Now → SpiderfeetApi.executeStep → four forms (or stub/error message).
+   * @returns {Promise<{ ok: boolean, kind: string, message: string, detail?: object|null, result?: object }>}
+   */
+  CliScanApp.runScanNow = async function (state) {
+    const container = state.container;
+    if (!container) {
+      return { ok: false, kind: 'error', message: 'CliScanApp has no container.' };
+    }
+    if (state.executing) {
+      return { ok: false, kind: 'busy', message: 'Scan already in progress.' };
+    }
+    if (state.mode !== 'edit-run') {
+      const message = 'Scan Now is only available in edit-run mode.';
+      CliScanApp._setStatus(container, state, message);
+      return { ok: false, kind: 'error', message };
+    }
+
+    const ctx = state.executeContext;
+    if (!ctx?.workflowId || !ctx?.stepId) {
+      const message =
+        'Cannot execute: missing workflow/step context. Open a project workflow and select a step.';
+      CliScanApp._setStatus(container, state, message);
+      CliScanApp._emitScanComplete(state, { ok: false, kind: 'error', message });
+      return { ok: false, kind: 'error', message };
+    }
+
+    const api = Widgets.SpiderfeetApi;
+    const useAsync =
+      api &&
+      typeof api.executeStepAsync === 'function' &&
+      typeof api.getWorkflowStatus === 'function' &&
+      typeof Widgets.Composer?.startStatusPoller === 'function';
+    if (!useAsync && (!api || typeof api.executeStep !== 'function')) {
+      const message = 'SpiderfeetApi execute is not available.';
+      CliScanApp._setStatus(container, state, message);
+      CliScanApp._emitScanComplete(state, { ok: false, kind: 'error', message });
+      return { ok: false, kind: 'error', message };
+    }
+
+    state.executing = true;
+    CliScanApp._syncRunButton(container, state);
+    CliScanApp._setStatus(
+      container,
+      state,
+      useAsync
+        ? `Starting live scan for ${ctx.stepId}…`
+        : `Executing ${ctx.stepId} via SpiderfeetApi…`
+    );
+
+    const body = {};
+    if (ctx.projectId) body.project_id = ctx.projectId;
+    body.step_id = ctx.stepId;
+
+    let result;
+    try {
+      if (useAsync) {
+        Widgets.Composer.stopStatusPoller?.();
+        const accepted = await api.executeStepAsync(
+          ctx.workflowId,
+          ctx.stepId,
+          body
+        );
+        if (!accepted || accepted.ok === false) {
+          const message =
+            accepted?.message ||
+            accepted?.detail ||
+            accepted?.error ||
+            'executeStepAsync failed';
+          state.executing = false;
+          CliScanApp._syncRunButton(container, state);
+          CliScanApp._setStatus(container, state, message);
+          const out = { ok: false, kind: 'error', message, result: accepted };
+          CliScanApp._emitScanComplete(state, out);
+          return out;
+        }
+        CliScanApp._setStatus(
+          container,
+          state,
+          `Scanning ${ctx.stepId} (run ${accepted.run_id || '?'}) — live DAG status…`
+        );
+        const finalStatus = await new Promise((resolve, reject) => {
+          Widgets.Composer.startStatusPoller(ctx.workflowId, {
+            onUpdate(payload) {
+              const step = (payload?.steps || []).find(
+                (s) => String(s.step_id || s.stepId) === String(ctx.stepId)
+              );
+              if (!step) return;
+              const ui =
+                Widgets.Composer.mapScanStatusToUi?.(step.scan_status) ||
+                step.scan_status;
+              CliScanApp._setStatus(
+                container,
+                state,
+                `Step ${ctx.stepId}: ${ui}`
+              );
+            },
+            onTerminal(payload) {
+              resolve(payload || {});
+            },
+            onError(err) {
+              console.warn('CliScanApp.runScanNow status poll', err);
+            },
+          });
+          if (!Widgets.Composer._statusPoller) {
+            reject(new Error('Failed to start status poller'));
+          }
+        });
+        const stepRow = (finalStatus.steps || []).find(
+          (s) => String(s.step_id || s.stepId) === String(ctx.stepId)
+        );
+        const scanStatus = String(stepRow?.scan_status || '').toUpperCase();
+        if (scanStatus === 'ERROR-FAILED') {
+          const message = `Step ${ctx.stepId} failed (ERROR-FAILED).`;
+          state.executing = false;
+          CliScanApp._syncRunButton(container, state);
+          CliScanApp._setStatus(container, state, message);
+          const out = {
+            ok: false,
+            kind: 'error',
+            message,
+            result: finalStatus,
+          };
+          CliScanApp._emitScanComplete(state, out);
+          return out;
+        }
+        // Shape a sync-like result so the four-form load path below can reuse getScanStep.
+        result = {
+          ok: true,
+          status: 'ok',
+          scan_instance_id: stepRow?.scan_instance_id || null,
+          step_id: ctx.stepId,
+          workflow_id: ctx.workflowId,
+          run_state: finalStatus.run_state,
+        };
+      } else {
+        result = await api.executeStep(ctx.workflowId, ctx.stepId, body);
+      }
+    } catch (err) {
+      Widgets.Composer?.stopStatusPoller?.();
+      const message = (err && err.message) || String(err);
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, `Execute failed — ${message}`);
+      const out = { ok: false, kind: 'error', message, result: null };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    if (!result || result.ok === false) {
+      const message =
+        (result && result.message) ||
+        `Execute failed (HTTP ${result?.status != null ? result.status : '?'})`;
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: false, kind: 'error', message, result };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    // AN2 stub until Epic AO — surface visibly; do not fake four forms.
+    const status = String(result.status || '').toLowerCase();
+    if (status === 'stub' || result.orchestrator === 'pending') {
+      const message =
+        result.message ||
+        'Execute accepted as stub — orchestrator pending (SPEC-010 AO). Four forms unavailable until live execute lands.';
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: true, kind: 'stub', message, result, detail: null };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    let detail = CliScanApp.detailFromScanStep(result);
+    const scanId =
+      result.scan_instance_id ||
+      result.scan_step_id ||
+      detail?.scan_instance_id ||
+      null;
+
+    // Persistence proof: re-fetch scan_step four forms when an id is returned.
+    if (scanId && typeof api.getScanStep === 'function') {
+      CliScanApp._setStatus(container, state, `Re-fetching scan step ${scanId}…`);
+      const refetched = await api.getScanStep(scanId);
+      if (refetched && refetched.ok !== false) {
+        const fromFetch = CliScanApp.detailFromScanStep(refetched);
+        if (fromFetch) detail = Object.assign({}, detail || {}, fromFetch);
+      } else if (!CliScanApp._detailHasRun(detail)) {
+        const message =
+          (refetched && refetched.message) ||
+          `Execute returned ${scanId}, but re-fetch failed.`;
+        state.executing = false;
+        CliScanApp._syncRunButton(container, state);
+        CliScanApp._setStatus(container, state, message);
+        const out = { ok: false, kind: 'error', message, result: refetched, detail };
+        CliScanApp._emitScanComplete(state, out);
+        return out;
+      }
+    }
+
+    if (!CliScanApp._detailHasRun(detail)) {
+      const message =
+        result.message ||
+        'Execute completed but returned no Text/Structured/Graph/Report forms yet.';
+      state.executing = false;
+      CliScanApp._syncRunButton(container, state);
+      CliScanApp._setStatus(container, state, message);
+      const out = { ok: true, kind: 'empty', message, result, detail };
+      CliScanApp._emitScanComplete(state, out);
+      return out;
+    }
+
+    await CliScanApp.applyRunDetail(state, detail);
+    state.executing = false;
+    // Keep Scan Now available for re-run only if host left runEnabled true; still show progress done.
+    CliScanApp._syncRunButton(container, state);
+    const message = scanId
+      ? `Scan complete — four forms loaded (persisted ${scanId}).`
+      : 'Scan complete — four forms loaded.';
+    CliScanApp._setStatus(container, state, message);
+    const out = { ok: true, kind: 'complete', message, result, detail };
+    CliScanApp._emitScanComplete(state, out);
+    return out;
+  };
+
+  CliScanApp._emitScanComplete = function (state, outcome) {
+    if (typeof state.onScanComplete !== 'function') return;
+    try {
+      state.onScanComplete(outcome);
+    } catch (err) {
+      console.warn('CliScanApp.onScanComplete failed', err);
+    }
+  };
+
+  /**
+   * Lock non-Scan tabs until a run exists (R11-13).
+   * Scan tab stays active; option controls remain enabled separately via mode.
+   */
+  CliScanApp._syncOutputTabs = function (container, state) {
+    if (!container) return;
+    const tabs = container.querySelectorAll('.cli-scan-tabs [data-bs-toggle="tab"], .cli-scan-tabs .nav-link');
+    const locked = !state.hasRun;
+    let scanTab = null;
+    tabs.forEach((tab) => {
+      const target = tab.getAttribute('data-bs-target') || '';
+      const isScan = target.endsWith('-pane-scan');
+      if (isScan) {
+        scanTab = tab;
+        tab.classList.remove('disabled');
+        tab.removeAttribute('aria-disabled');
+        tab.removeAttribute('tabindex');
+        tab.title = '';
+        return;
+      }
+      if (locked) {
+        tab.classList.add('disabled');
+        tab.setAttribute('aria-disabled', 'true');
+        tab.setAttribute('tabindex', '-1');
+        tab.title = 'Locked until this step has a run';
+      } else {
+        tab.classList.remove('disabled');
+        tab.removeAttribute('aria-disabled');
+        tab.removeAttribute('tabindex');
+        tab.title = '';
+      }
+    });
+    container.classList.toggle('cli-scan-outputs-locked', locked);
+
+    if (locked && scanTab) {
+      const activeNonScan = container.querySelector(
+        '.cli-scan-tabs .nav-link.active:not([data-bs-target$="-pane-scan"])'
+      );
+      if (activeNonScan || !scanTab.classList.contains('active')) {
+        try {
+          if (window.bootstrap?.Tab) {
+            window.bootstrap.Tab.getOrCreateInstance(scanTab).show();
+          } else {
+            container.querySelectorAll('.cli-scan-tabs .nav-link').forEach((t) => {
+              t.classList.toggle('active', t === scanTab);
+              t.setAttribute('aria-selected', t === scanTab ? 'true' : 'false');
+            });
+            container.querySelectorAll('.cli-scan-tab-content > .tab-pane').forEach((pane) => {
+              const show = pane.id === `${state.instanceId}-pane-scan`;
+              pane.classList.toggle('show', show);
+              pane.classList.toggle('active', show);
+            });
+          }
+        } catch (err) {
+          console.warn('CliScanApp._syncOutputTabs: could not activate Scan tab', err);
+        }
+      }
+    }
   };
 
   CliScanApp._shellHtml = function (state) {
@@ -194,9 +673,9 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
   </ul>
   <div class="tab-content flex-grow-1 border border-top-0 rounded-bottom min-h-0 cli-scan-tab-content">
     <div class="tab-pane fade show active h-100 min-h-0" id="${id}-pane-scan" role="tabpanel">
-      <div class="row g-0 h-100 min-h-0 cli-scan-scan-layout">
-        <div class="col-12 col-lg-10 border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-options-palette></div>
-        <div class="col-12 col-lg-2 cli-scan-rail cli-scan-command-palette p-2 d-flex flex-column gap-2 min-h-0">
+      <div class="row g-0 h-100 min-h-0 cli-scan-scan-layout${state.layout === 'composer' ? ' cli-scan-scan-layout--composer' : ''}">
+        <div class="${state.layout === 'composer' ? 'col cli-scan-form-col' : 'col-12 col-lg-10'} border-end cli-scan-form-col overflow-auto p-3" data-cli-scan-options-palette></div>
+        <div class="${state.layout === 'composer' ? 'col-auto cli-scan-rail' : 'col-12 col-lg-2 cli-scan-rail'} cli-scan-command-palette p-2 d-flex flex-column gap-2 min-h-0">
           <div class="d-grid gap-2 flex-shrink-0" data-cli-scan-rail-actions></div>
           <label class="small fw-semibold mt-2 flex-shrink-0">Command preview</label>
           <pre class="cli-scan-command-preview small bg-body-secondary bg-opacity-25 border rounded p-2 mb-0 flex-grow-1" data-cli-scan-command></pre>
@@ -231,8 +710,26 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     <div class="tab-pane fade cli-scan-pane-scroll" id="${id}-pane-report" role="tabpanel"><div class="profiling-markdown-doc p-3" data-cli-scan-report></div></div>
   </div>
   <footer class="small text-body-secondary px-2 py-1 border-top" data-cli-scan-status aria-live="polite"></footer>
-  <div class="modal fade" tabindex="-1" data-cli-scan-modal><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" data-cli-scan-modal-title>Document</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body profiling-markdown-doc" data-cli-scan-modal-body></div></div></div></div>
+  <div class="modal fade" tabindex="-1" id="${id}-doc-modal" data-cli-scan-modal="${id}" data-cli-scan-instance="${id}"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" data-cli-scan-modal-title>Document</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body profiling-markdown-doc" data-cli-scan-modal-body></div></div></div></div>
 </div>`;
+  };
+
+  /**
+   * Host modals on document.body so Bootstrap backdrops (z-index ~1050) cannot
+   * cover the dialog. Nested hosts (Composer slide-in with transform/overflow)
+   * otherwise trap the modal under the page mask.
+   */
+  CliScanApp._ensureModalOnBody = function (container, state) {
+    let modalEl =
+      state.modalEl ||
+      container.querySelector('[data-cli-scan-modal]') ||
+      document.querySelector(`[data-cli-scan-modal="${state.instanceId}"]`);
+    if (!modalEl) return null;
+    state.modalEl = modalEl;
+    if (modalEl.parentElement !== document.body) {
+      document.body.appendChild(modalEl);
+    }
+    return modalEl;
   };
 
   CliScanApp._setStatus = function (container, state, msg) {
@@ -254,13 +751,27 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     });
     state._tabListeners = [];
     container.querySelectorAll('.cli-scan-tabs [data-bs-toggle="tab"]').forEach((tab) => {
-      const fn = () => {
+      const showFn = () => {
         if (tab.id === `${state.instanceId}-tab-graph` && state.detail?.graph_proposal) {
           setTimeout(() => CliScanApp.renderProposalGraph(container, state, state.detail.graph_proposal), 50);
         }
       };
-      tab.addEventListener('shown.bs.tab', fn);
-      state._tabListeners.push({ tab, fn });
+      const guardFn = (event) => {
+        const target = tab.getAttribute('data-bs-target') || '';
+        const isScan = target.endsWith('-pane-scan');
+        if (!state.hasRun && !isScan) {
+          event.preventDefault();
+          event.stopPropagation();
+          CliScanApp._setStatus(
+            container,
+            state,
+            'Output tabs are locked until this step has a run.'
+          );
+        }
+      };
+      tab.addEventListener('show.bs.tab', guardFn);
+      tab.addEventListener('shown.bs.tab', showFn);
+      state._tabListeners.push({ tab, fn: showFn }, { tab, fn: guardFn, type: 'show.bs.tab' });
     });
     // Stored on state (not an inline arrow) so CliScanApp.destroy can remove it —
     // otherwise every reopened scenario leaks another window listener, and
@@ -306,11 +817,26 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     }
     runBtn.classList.remove('active');
     runBtn.removeAttribute('aria-pressed');
+    runBtn.textContent = state.executing ? 'Scanning…' : 'Scan Now';
+    // R11-13 / R11-15: unset steps stay disabled until host sets runEnabled from validationResult.
+    if (state.executing) {
+      runBtn.disabled = true;
+      runBtn.title = 'Scan in progress…';
+      return;
+    }
+    if (!state.runEnabled) {
+      runBtn.disabled = true;
+      runBtn.title = state.hasRun
+        ? 'Scan Now is disabled for this step.'
+        : 'Scan Now disabled until the editor reports this step valid.';
+      return;
+    }
     runBtn.disabled = false;
-    runBtn.title = 'Submit the command preview for execution';
-    runBtn.textContent = 'Scan Now';
+    runBtn.title = state.executeContext
+      ? 'Run this step via SpiderfeetApi execute (SPEC-010)'
+      : 'Submit the command preview for execution';
     runBtn._cliScanRunHandler = () => {
-      CliScanApp._setStatus(container, state, 'Scan Now is not wired to live execution in this build.');
+      CliScanApp.runScanNow(state);
     };
     runBtn.addEventListener('click', runBtn._cliScanRunHandler);
   };
@@ -350,8 +876,12 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     let valueMode;
     if (/[A-Za-z0-9]<[^>]+>$/.test(raw)) valueMode = 'attached';
     else if (/\s+<[^>]+>$/.test(raw)) valueMode = 'space';
-    else if (['select', 'integer', 'float', 'path'].includes(flag.type)) valueMode = 'space';
-    else valueMode = 'none';
+    else if (['select', 'integer', 'float', 'path', 'string'].includes(flag.type)) {
+      // string: default space so path flags (-dL) get a value box; switches
+      // mistyped as string are demoted to toggles in _initialValues when argv
+      // has no following value.
+      valueMode = 'space';
+    } else valueMode = 'none';
 
     const head = raw.replace(/\s+<[^>]+>$/, '').replace(/<[^>]+>$/, '');
     const parts = head.split('/').filter(Boolean);
@@ -392,9 +922,17 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     for (let i = 0; i < cmdParts.length; i += 1) {
       const p = cmdParts[i];
       if (p === tok) {
-        if (row.valueMode === 'none') return { enabled: true, value: '' };
         const next = cmdParts[i + 1];
-        const looksLikeFlag = next != null && next !== '-' && next.startsWith('-') && next.length > 1;
+        const looksLikeFlag =
+          next != null && next !== '-' && next.startsWith('-') && !next.startsWith('-$') && next.length > 1;
+        // Schema may mark value-taking flags as boolean; still bind workflow
+        // placeholders / bare paths when they follow the flag in argv.
+        if (row.valueMode === 'none') {
+          if (next != null && !looksLikeFlag) {
+            return { enabled: true, value: next, inferredValue: true };
+          }
+          return { enabled: true, value: '' };
+        }
         if (next == null || looksLikeFlag) return { enabled: true, value: '' };
         return { enabled: true, value: next };
       }
@@ -408,7 +946,15 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     return null;
   };
 
-  CliScanApp._chooseColCount = function (flagCount) {
+  CliScanApp._chooseColCount = function (flagCount, state) {
+    // Composer slide-in is narrower (~9 option cols + 2-col rail) — never use 3 columns.
+    const narrow =
+      state?.layout === 'composer' ||
+      state?.container?.closest?.('.composer-cliscan-slot');
+    if (narrow) {
+      if (flagCount <= 4) return 1;
+      return 2;
+    }
     if (flagCount <= 3) return 1;
     if (flagCount <= 10) return 2;
     return 3;
@@ -427,8 +973,26 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
   CliScanApp._initialValues = function (schema, detail) {
     const values = {};
     const cmd = String(detail?.command || '').trim();
-    const cmdParts = cmd ? cmd.split(/\s+/) : [];
+    const argvParts = Array.isArray(detail?.argv)
+      ? detail.argv.map((t) => String(t))
+      : null;
+    const cmdParts = argvParts || (cmd ? cmd.split(/\s+/) : []);
     const rows = CliScanApp._buildRows(schema);
+    // Tokens consumed as flag values (so positionals do not steal `$step.files.*`).
+    const consumedValueIdx = new Set();
+    rows.forEach((row) => {
+      if (row.isPositional || !cmdParts.length) return;
+      const detected = CliScanApp._detectRowInCommand(row, cmdParts);
+      if (!detected || !detected.value) return;
+      const tok = row.displayToken;
+      for (let i = 0; i < cmdParts.length; i += 1) {
+        if (cmdParts[i] === tok && cmdParts[i + 1] === detected.value) {
+          consumedValueIdx.add(i + 1);
+          break;
+        }
+      }
+    });
+
     rows.forEach((row) => {
       let detected = null;
       if (cmdParts.length) detected = CliScanApp._detectRowInCommand(row, cmdParts);
@@ -436,10 +1000,18 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         let posVal = '';
         for (let i = 0; i < cmdParts.length; i += 1) {
           const p = cmdParts[i];
-          if (i === 0) continue;
-          if (p.startsWith('-')) continue;
-          const prev = cmdParts[i - 1];
-          if (prev && prev.startsWith('-') && prev !== '-') continue;
+          if (i === 0 && !argvParts) continue;
+          if (consumedValueIdx.has(i)) continue;
+          if (p.startsWith('-') && !p.startsWith('-$')) continue;
+          // Allow workflow placeholders (`$step.files.input`) as positional values.
+          const prev = i > 0 ? cmdParts[i - 1] : '';
+          if (prev && prev.startsWith('-') && prev !== '-' && !prev.startsWith('-$')) {
+            // Previous token is a flag that likely owns this value — skip for bare positionals.
+            const prevRow = rows.find(
+              (r) => !r.isPositional && r.displayToken === prev && r.valueMode !== 'none'
+            );
+            if (prevRow) continue;
+          }
           posVal = p;
           break;
         }
@@ -449,16 +1021,80 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         };
         return;
       }
+      // Boolean-typed schema flags that still carry a value in workflow argv
+      // need a value control for Scan ↔ YAML sync (e.g. `-o $step.files.output`).
+      if (detected?.inferredValue && row.valueMode === 'none') {
+        row.valueMode = 'space';
+      }
+      // Many tools mark switch flags as type=string; demote to toggle when argv
+      // has no following value (keeps -oJ/-silent clean while -dL keeps its path).
+      if (
+        row.flag.type === 'string' &&
+        row.valueMode === 'space' &&
+        detected?.enabled &&
+        !detected.value
+      ) {
+        row.valueMode = 'none';
+      }
       const defaultEnabled = Boolean(row.flag.default);
       values[row.key] = detected
-        ? detected
+        ? { enabled: detected.enabled, value: detected.value || '' }
         : {
           enabled: defaultEnabled,
           value: row.valueMode !== 'none' && typeof row.flag.default === 'string' ? row.flag.default : '',
         };
     });
-    if (cmd) values.__captured_command = cmd;
+    // Captured command is for view-mode preview only — not argv-seeded edit-run forms.
+    if (cmd && !argvParts) values.__captured_command = cmd;
     return { values, rows };
+  };
+
+  /**
+   * Build workflow `config.argv` tokens from the current option form (no executable).
+   * @param {{ rows?: Array, values?: object }} state
+   * @returns {string[]}
+   */
+  CliScanApp.buildArgvTokens = function (state) {
+    const tokens = [];
+    (state.rows || []).forEach((row) => {
+      const v = state.values?.[row.key];
+      if (!v) return;
+      if (row.isPositional) {
+        if (v.value) tokens.push(String(v.value));
+        return;
+      }
+      if (!v.enabled) return;
+      const tok = row.displayToken;
+      if (row.valueMode === 'none') {
+        tokens.push(tok);
+        // Preserve values inferred from workflow argv on mis-typed schema flags.
+        if (v.value !== '' && v.value != null) tokens.push(String(v.value));
+        return;
+      }
+      if (row.valueMode === 'attached' && v.value !== '' && v.value != null) {
+        tokens.push(`${tok}${v.value}`);
+        return;
+      }
+      tokens.push(tok);
+      if (v.value !== '' && v.value != null) tokens.push(String(v.value));
+    });
+    return tokens;
+  };
+
+  /** Notify host (Composer) of option edits — R11-14 / AU1. */
+  CliScanApp._emitOptionsChange = function (state) {
+    if (state.mode !== 'edit-run') return;
+    if (typeof state.onOptionsChange !== 'function') return;
+    try {
+      state.onOptionsChange({
+        toolId: state.toolId,
+        argv: CliScanApp.buildArgvTokens(state),
+        values: state.values,
+        scenarioKey: state.scenarioKey,
+      });
+    } catch (err) {
+      console.warn('CliScanApp.onOptionsChange failed', err);
+    }
   };
 
   CliScanApp._renderScanForm = function (container, state) {
@@ -497,7 +1133,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     groupOrder.forEach((groupName) => {
       const groupRows = (byGroup.get(groupName) || []).filter((r) => !r.isPositional);
       if (!groupRows.length) return;
-      const cols = CliScanApp._chooseColCount(groupRows.length);
+      const cols = CliScanApp._chooseColCount(groupRows.length, state);
       const buckets = CliScanApp._distributeFlags(groupRows, cols);
       const bucketHtml = buckets
         .map(
@@ -619,6 +1255,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           }
         }
         CliScanApp._updateCommandPreview(container, state);
+        CliScanApp._emitOptionsChange(state);
       });
     });
 
@@ -632,6 +1269,7 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           state.values[rowKey].enabled = input.value.trim().length > 0;
         }
         CliScanApp._updateCommandPreview(container, state);
+        CliScanApp._emitOptionsChange(state);
       };
       input.addEventListener('input', handler);
       input.addEventListener('change', handler);
@@ -678,10 +1316,13 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
     };
     const titles = { options: 'CLI Options', 'graph-structure': 'Graph Structure', 'zero-to-hero': 'Zero to Hero Guide' };
     const doc = await Connection.fetchJson(paths[kind]);
-    const modalEl = container.querySelector('[data-cli-scan-modal]');
-    container.querySelector('[data-cli-scan-modal-title]').textContent = `${state.toolId} — ${titles[kind]}`;
-    await CliScanApp.renderMarkdownDoc(container.querySelector('[data-cli-scan-modal-body]'), doc.markdown, 'No content.');
-    window.bootstrap?.Modal.getOrCreateInstance(modalEl).show();
+    const modalEl = CliScanApp._ensureModalOnBody(container, state);
+    if (!modalEl || !window.bootstrap?.Modal) return;
+    const titleEl = modalEl.querySelector('[data-cli-scan-modal-title]');
+    const bodyEl = modalEl.querySelector('[data-cli-scan-modal-body]');
+    if (titleEl) titleEl.textContent = `${state.toolId} — ${titles[kind]}`;
+    await CliScanApp.renderMarkdownDoc(bodyEl, doc.markdown, 'No content.');
+    window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
   };
 
   CliScanApp._renderOutputs = async function (container, state) {

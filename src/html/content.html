@@ -4,47 +4,46 @@
   id="widget-root"
   data-api-base="http://127.0.0.1:8001/api/v1"
   data-data-viewer-url="http://localhost:3000/widget"
+  data-yaml-workflow-url="http://localhost:4009"
 >
-  <header class="border-bottom bg-body-tertiary">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2" aria-label="SpiderFeet">
+  <header class="border-bottom bg-body-tertiary app-header" id="app-header">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-1" aria-label="SpiderFeet">
       <div class="container-fluid p-0">
         <a class="navbar-brand me-3 py-0" href="#">
           <img
             src="logos/spiderfeet_logo_horizontal_dark.svg"
             alt="SpiderFeet"
             class="navbar-brand-logo"
-            width="336"
-            height="64"
+            width="210"
+            height="40"
           />
         </a>
 
         <ul class="navbar-nav flex-row gap-1 me-auto" role="tablist">
           <li class="nav-item" role="presentation">
             <button
-              class="nav-link text-white-50 px-2 py-1"
+              class="nav-link active text-white px-2 py-1"
               type="button"
-              disabled
-              title="Stage 2 — not yet implemented"
+              data-shell-tab="projects"
+              aria-current="page"
             >
-              Enrichments
+              Projects
             </button>
           </li>
           <li class="nav-item" role="presentation">
             <button
               class="nav-link text-white-50 px-2 py-1"
               type="button"
-              disabled
-              title="Stage 2 — not yet implemented"
+              data-shell-tab="composer"
             >
               Composer
             </button>
           </li>
           <li class="nav-item" role="presentation">
             <button
-              class="nav-link active text-white px-2 py-1"
+              class="nav-link text-white-50 px-2 py-1"
               type="button"
               data-shell-tab="maps"
-              aria-current="page"
             >
               Maps
             </button>
@@ -137,6 +136,455 @@
   <div class="tab-content flex-grow-1 overflow-hidden d-flex flex-column">
     <div
       class="tab-pane fade show active flex-grow-1 d-flex flex-column overflow-hidden"
+      id="pane-projects"
+      role="tabpanel"
+      data-shell-pane="projects"
+      data-widget="projects-panel"
+    >
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
+        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex align-items-center gap-2">
+          <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Projects</h2>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            id="projects-new"
+            title="Create a new project"
+          >
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            New Project
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            id="projects-refresh"
+            title="Refresh projects"
+          >
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+            <span class="visually-hidden">Refresh</span>
+          </button>
+        </div>
+        <div
+          class="px-3 pt-2 flex-shrink-0 d-none"
+          id="projects-alert"
+          role="alert"
+          aria-live="polite"
+        ></div>
+        <div class="flex-grow-1 overflow-auto p-2" id="projects-main">
+          <div class="d-flex align-items-center justify-content-center py-5 text-body-secondary" role="status">
+            <div class="spinner-border spinner-border-sm me-2" aria-hidden="true"></div>
+            <span>Loading projects…</span>
+          </div>
+        </div>
+        <footer
+          class="border-top px-3 py-1 small text-body-secondary flex-shrink-0"
+          id="projects-status"
+          aria-live="polite"
+        >
+          <span id="projects-status-text">Projects pane ready.</span>
+        </footer>
+      </div>
+
+      <div
+        class="modal fade"
+        id="projects-modal"
+        tabindex="-1"
+        aria-labelledby="projects-modal-title"
+        aria-hidden="true"
+      >
+        <div class="modal-dialog">
+          <form class="modal-content" id="projects-form">
+            <div class="modal-header">
+              <h5 class="modal-title" id="projects-modal-title">New Project</h5>
+              <button
+                type="button"
+                class="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"
+              ></button>
+            </div>
+            <div class="modal-body">
+              <input type="hidden" id="projects-form-mode" value="create" />
+              <div class="mb-3">
+                <label for="projects-form-name" class="form-label">Name</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-name"
+                  required
+                  autocomplete="off"
+                  placeholder="Project name"
+                />
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-description" class="form-label">Description</label>
+                <textarea
+                  class="form-control form-control-sm"
+                  id="projects-form-description"
+                  rows="2"
+                  placeholder="What this project is for"
+                ></textarea>
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-id" class="form-label">Project ID</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-id"
+                  readonly
+                  tabindex="-1"
+                />
+                <div class="form-text">Generated client-side; sent to the API on create.</div>
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-created" class="form-label">Created</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-created"
+                  readonly
+                  tabindex="-1"
+                />
+              </div>
+              <div class="mb-3">
+                <label for="projects-form-stix" class="form-label">STIX incident ID</label>
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="projects-form-stix"
+                  placeholder="incident--… (optional)"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="alert alert-danger d-none mb-0" id="projects-form-error" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-sm btn-primary" id="projects-form-submit">
+                Create Project
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
+      id="pane-composer"
+      role="tabpanel"
+      data-shell-pane="composer"
+      data-widget="composer-panel"
+    >
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
+        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex align-items-center gap-2 flex-wrap">
+          <h2 class="h6 text-uppercase text-body-secondary mb-0">Composer</h2>
+          <div class="dropdown">
+            <button
+              class="btn btn-sm btn-outline-secondary dropdown-toggle"
+              type="button"
+              id="composer-project-dropdown"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              aria-label="Select project"
+            >
+              <span id="composer-project-label">No project selected</span>
+            </button>
+            <ul
+              class="dropdown-menu"
+              id="composer-project-menu"
+              aria-labelledby="composer-project-dropdown"
+              style="max-height: 18rem; overflow: auto; min-width: 16rem"
+            >
+              <li class="px-3 py-1">
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="checkbox" id="composer-add-new-project" />
+                  <label class="form-check-label small" for="composer-add-new-project">Add new project</label>
+                </div>
+              </li>
+              <li><hr class="dropdown-divider" /></li>
+              <li class="px-3 py-1 small text-body-secondary" id="composer-project-menu-empty">
+                Loading projects…
+              </li>
+            </ul>
+          </div>
+          <span class="small text-body-secondary me-auto d-none" id="composer-project-meta" aria-live="polite"></span>
+          <div
+            class="composer-status-legend d-flex align-items-center gap-2 small text-body-secondary me-1"
+            id="composer-status-legend"
+            title="Live workflow step status (DAG colors)"
+            aria-label="Workflow step status legend"
+          >
+            <span class="composer-status-swatch" data-status="waiting" title="Waiting">⏱</span>
+            <span class="composer-status-swatch" data-status="running" title="Running">↻</span>
+            <span class="composer-status-swatch" data-status="complete" title="Complete">✓</span>
+            <span class="composer-status-swatch" data-status="failed" title="Failed">✕</span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            id="composer-reset-workflow"
+            title="Clear all scan-step results and temporary context; keep the workflow YAML"
+            aria-label="Reset Workflow"
+          >
+            Reset Workflow
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            id="composer-run-workflow"
+            disabled
+            title="Run the full multi-step workflow after the YAML editor validates it"
+            aria-label="Run Workflow"
+          >
+            Run Workflow
+          </button>
+        </div>
+
+        <div
+          class="row g-0 flex-grow-1 overflow-hidden h-100 flex-nowrap position-relative composer-workspace"
+          id="composer-workspace"
+          data-composer-left-state="partial"
+          data-composer-right-open="false"
+        >
+          <!-- Left: YAML workflow editor column (AS1 embeds iframe). 12-col states: 0 / 3 / 12 -->
+          <aside
+            class="composer-left col-3 border-end bg-body d-flex flex-column overflow-hidden flex-shrink-0"
+            id="composer-left"
+            aria-label="Workflow editor"
+            data-composer-region="left"
+          >
+            <div class="composer-region-toolbar border-bottom px-2 py-1 flex-shrink-0 d-flex align-items-center gap-1">
+              <span class="small text-body-secondary text-truncate me-auto">Workflow</span>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-workflow-edit-toggle"
+                title="Edit workflow"
+                aria-label="Edit workflow"
+                aria-pressed="false"
+                data-editing="false"
+              >
+                <i class="fa-solid fa-pencil" aria-hidden="true" data-edit-icon></i>
+                <span class="visually-hidden">Edit</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-workflow-settings"
+                title="Workflow settings"
+                aria-label="Workflow settings"
+              >
+                <i class="fa-solid fa-gear" aria-hidden="true"></i>
+                <span class="visually-hidden">Settings</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-workflow-reset-view"
+                title="Reset view (70% or fit width + 10px)"
+                aria-label="Reset workflow view"
+              >
+                <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+                <span class="visually-hidden">Reset view</span>
+              </button>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Workflow column width">
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  id="composer-left-collapse"
+                  data-composer-left-state="collapsed"
+                  title="Collapse workflow column"
+                  aria-label="Collapse workflow column"
+                >
+                  <i class="fa-solid fa-angles-left" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary active"
+                  id="composer-left-partial"
+                  data-composer-left-state="partial"
+                  title="Partial workflow column (≈3 columns)"
+                  aria-label="Partial workflow column"
+                >
+                  <i class="fa-solid fa-columns" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  id="composer-left-full"
+                  data-composer-left-state="full"
+                  title="Full-width workflow column"
+                  aria-label="Full-width workflow column"
+                >
+                  <i class="fa-solid fa-expand" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <div
+              class="composer-yaml-slot flex-grow-1 d-flex flex-column overflow-hidden p-0"
+              id="composer-yaml-slot"
+              data-composer-workflow-mounted="false"
+            ></div>
+          </aside>
+
+          <!-- Collapsed left rail (visible when left state = collapsed) -->
+          <div
+            class="composer-left-rail border-end bg-body-tertiary d-none flex-column align-items-center py-2 gap-2 flex-shrink-0"
+            id="composer-left-rail"
+            aria-label="Expand workflow column"
+          >
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              id="composer-left-expand-from-rail"
+              data-composer-left-state="partial"
+              title="Show workflow column"
+              aria-label="Show workflow column"
+            >
+              <i class="fa-solid fa-angles-right" aria-hidden="true"></i>
+            </button>
+            <span class="composer-left-rail-label small text-body-secondary">YAML</span>
+          </div>
+
+          <!-- Center: Project Context (upper) + Temporary Subgraph (lower) -->
+          <main
+            class="composer-center col-9 d-flex flex-column overflow-hidden min-w-0 flex-grow-1"
+            id="composer-center"
+            data-composer-region="center"
+          >
+            <section
+              class="composer-viewer flex-grow-1 d-flex flex-column overflow-hidden min-h-0 border-bottom"
+              id="composer-project-context"
+              aria-label="Project Context Viewer"
+            >
+              <div class="composer-region-toolbar border-bottom px-2 py-1 flex-shrink-0 d-flex align-items-center gap-1">
+                <h3 class="h6 small text-uppercase text-body-secondary mb-0 me-auto">Project Context Viewer</h3>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  id="composer-context-expand"
+                  data-composer-expand="project-context"
+                  title="Expand Project Context Viewer"
+                  aria-label="Expand Project Context Viewer"
+                  aria-pressed="false"
+                >
+                  <i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true" data-composer-expand-icon></i>
+                </button>
+              </div>
+              <div
+                class="composer-viewer-stage flex-grow-1 position-relative bg-body overflow-hidden"
+                id="composer-project-context-stage"
+                data-composer-graph-stage="project-context"
+              >
+                <canvas
+                  id="composer-project-context-canvas"
+                  class="composer-graph-canvas viz-layer w-100 h-100"
+                  role="img"
+                  aria-label="Project context graph (empty)"
+                  data-composer-graph-canvas="project-context"
+                ></canvas>
+                <div
+                  id="composer-project-context-tooltip"
+                  class="composer-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                  hidden
+                  data-composer-graph-tooltip="project-context"
+                ></div>
+              </div>
+            </section>
+
+            <section
+              class="composer-viewer flex-grow-1 d-flex flex-column overflow-hidden min-h-0"
+              id="composer-temp-subgraph"
+              aria-label="Temporary Subgraph Viewer"
+            >
+              <div class="composer-region-toolbar border-bottom px-2 py-1 flex-shrink-0 d-flex align-items-center gap-1">
+                <h3 class="h6 small text-uppercase text-body-secondary mb-0 me-auto">Temporary Subgraph Viewer</h3>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  id="composer-temp-expand"
+                  data-composer-expand="temp-subgraph"
+                  title="Expand Temporary Subgraph Viewer"
+                  aria-label="Expand Temporary Subgraph Viewer"
+                  aria-pressed="false"
+                >
+                  <i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true" data-composer-expand-icon></i>
+                </button>
+              </div>
+              <!-- SPEC-017 R17-07 — per-subgraph centre chips (read-only; no delete) -->
+              <div
+                id="composer-temp-subgraph-list"
+                class="composer-temp-subgraph-list border-bottom px-2 py-1 flex-shrink-0 d-flex flex-wrap align-items-center gap-1"
+                aria-label="Imported temporary subgraphs"
+                hidden
+                aria-hidden="true"
+              ></div>
+              <div
+                class="composer-viewer-stage flex-grow-1 position-relative bg-body overflow-hidden"
+                id="composer-temp-subgraph-stage"
+                data-composer-graph-stage="temp-subgraph"
+              >
+                <canvas
+                  id="composer-temp-subgraph-canvas"
+                  class="composer-graph-canvas viz-layer w-100 h-100"
+                  role="img"
+                  aria-label="Temporary subgraph graph"
+                  data-composer-graph-canvas="temp-subgraph"
+                ></canvas>
+                <div
+                  id="composer-temp-subgraph-tooltip"
+                  class="composer-graph-tooltip viz-tooltip position-absolute border rounded bg-body px-2 py-1 small shadow-sm"
+                  hidden
+                  data-composer-graph-tooltip="temp-subgraph"
+                ></div>
+              </div>
+            </section>
+          </main>
+
+          <!-- Right slide-in: CliScanApp (AT1). Covers columns 4–12 when open. -->
+          <aside
+            class="composer-right border-start bg-body d-flex flex-column overflow-hidden"
+            id="composer-right"
+            aria-label="CLI scan app"
+            data-composer-region="right"
+            hidden
+          >
+            <div class="composer-region-toolbar border-bottom px-2 py-1 flex-shrink-0 d-flex align-items-center gap-1">
+              <span class="small text-body-secondary text-truncate me-auto" id="composer-right-title">CLI App</span>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="composer-right-close"
+                title="Close CLI app panel"
+                aria-label="Close CLI app panel"
+              >
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div
+              class="composer-cliscan-slot flex-grow-1 d-flex flex-column align-items-center justify-content-center text-body-secondary p-2 overflow-auto min-h-0"
+              id="composer-cliscan-slot"
+              data-composer-cliscan-slot
+            >
+              <p class="small mb-0 text-center">Select a workflow step to open its CLI app.</p>
+            </div>
+          </aside>
+        </div>
+
+        <footer
+          class="border-top px-3 py-1 small text-body-secondary flex-shrink-0"
+          id="composer-status"
+          aria-live="polite"
+        >
+          <span id="composer-status-text">Composer ready.</span>
+        </footer>
+      </div>
+    </div>
+
+    <div
+      class="tab-pane fade flex-grow-1 d-flex flex-column overflow-hidden d-none"
       id="pane-maps"
       role="tabpanel"
       data-shell-pane="maps"
@@ -149,7 +597,7 @@
           aria-label="Map filters and inventory"
           hidden
         >
-          <div class="map-filter-panel-scroll flex-grow-1 overflow-auto p-3">
+          <div class="map-filter-panel-scroll flex-grow-1 overflow-auto p-2">
           <h2 class="h6 text-uppercase text-body-secondary mb-2">Inventory</h2>
           <div class="row small text-body-secondary mb-1" id="map-inventory-header">
             <span class="col-5"></span>
@@ -424,7 +872,7 @@
           </div>
 
           <footer
-            class="border-top px-3 py-2 small text-body-secondary d-flex justify-content-between"
+            class="border-top px-3 py-1 small text-body-secondary d-flex justify-content-between"
             id="map-status"
             aria-live="polite"
           >
@@ -443,7 +891,7 @@
       data-widget="tests-panel"
     >
       <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
-        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Test filters">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-2 bg-body flex-shrink-0" aria-label="Test filters">
           <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
           <div class="mb-3">
             <label for="tests-search" class="form-label small">Search modules</label>
@@ -518,7 +966,7 @@
         </aside>
 
         <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden tests-main">
-          <div class="p-3 border-bottom bg-body flex-shrink-0">
+          <div class="p-2 border-bottom bg-body flex-shrink-0">
             <h2 class="h6 text-uppercase text-body-secondary mb-2">Coverage summary</h2>
             <dl class="row small mb-0" id="tests-summary">
               <dt class="col-6 col-lg-3">Modules</dt>
@@ -550,7 +998,7 @@
             </dl>
           </div>
 
-          <div class="flex-grow-1 overflow-auto position-relative p-3" id="tests-scroll-region">
+          <div class="flex-grow-1 overflow-auto position-relative p-2" id="tests-scroll-region">
             <div
               id="tests-spinner"
               class="position-absolute top-50 start-50 translate-middle d-none"
@@ -564,7 +1012,7 @@
           </div>
 
           <footer
-            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+            class="border-top px-3 py-1 small text-body-secondary flex-shrink-0"
             id="tests-status"
             aria-live="polite"
           >
@@ -582,7 +1030,7 @@
       data-widget="subscriptions-panel"
     >
       <div class="row g-0 flex-grow-1 flex-nowrap h-100 overflow-hidden">
-        <aside class="col-12 col-md-3 border-end overflow-auto p-3 bg-body flex-shrink-0" aria-label="Subscription filters">
+        <aside class="col-12 col-md-3 border-end overflow-auto p-2 bg-body flex-shrink-0" aria-label="Subscription filters">
           <h2 class="h6 text-uppercase text-body-secondary mb-3">Filters</h2>
           <div class="mb-3">
             <label for="subscriptions-search" class="form-label small">Search modules</label>
@@ -654,7 +1102,7 @@
         </aside>
 
         <main class="col-12 col-md-9 d-flex flex-column flex-grow-1 overflow-hidden subscriptions-main">
-          <div class="p-3 border-bottom bg-body flex-shrink-0">
+          <div class="p-2 border-bottom bg-body flex-shrink-0">
             <h2 class="h6 text-uppercase text-body-secondary mb-2">Subscription summary</h2>
             <dl class="row small mb-0" id="subscriptions-summary">
               <dt class="col-6 col-lg-4">Key-required modules</dt>
@@ -670,7 +1118,7 @@
             </dl>
           </div>
 
-          <div class="flex-grow-1 overflow-auto position-relative p-3" id="subscriptions-scroll-region">
+          <div class="flex-grow-1 overflow-auto position-relative p-2" id="subscriptions-scroll-region">
             <div
               id="subscriptions-spinner"
               class="position-absolute top-50 start-50 translate-middle d-none"
@@ -711,7 +1159,7 @@
           </div>
 
           <footer
-            class="border-top px-3 py-2 small text-body-secondary flex-shrink-0"
+            class="border-top px-3 py-1 small text-body-secondary flex-shrink-0"
             id="subscriptions-status"
             aria-live="polite"
           >
@@ -729,11 +1177,11 @@
       data-widget="settings-panel"
     >
       <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
-        <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex align-items-center gap-2">
+        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex align-items-center gap-2">
           <h2 class="h6 text-uppercase text-body-secondary mb-0 me-auto">Settings</h2>
           <button type="button" class="btn btn-sm btn-primary" id="settings-refresh">Refresh</button>
         </div>
-        <div class="flex-grow-1 overflow-auto p-3">
+        <div class="flex-grow-1 overflow-auto p-2">
           <section class="mb-4" aria-labelledby="settings-cli-apps-heading">
             <h3 class="h6" id="settings-cli-apps-heading">CLI App Paths</h3>
             <p class="small text-body-secondary">
@@ -786,7 +1234,7 @@
             </div>
           </section>
         </div>
-        <footer class="border-top px-3 py-2 small text-body-secondary flex-shrink-0" id="settings-status" aria-live="polite">
+        <footer class="border-top px-3 py-1 small text-body-secondary flex-shrink-0" id="settings-status" aria-live="polite">
           <span id="settings-status-text">Connect to the API to manage settings.</span>
         </footer>
       </div>
@@ -800,7 +1248,7 @@
       data-widget="profiling-panel"
     >
       <div class="d-flex flex-column flex-grow-1 overflow-hidden h-100">
-        <div class="border-bottom bg-body px-3 py-2 flex-shrink-0 d-flex flex-wrap align-items-center gap-2" data-viewer-chrome="graph">
+        <div class="border-bottom bg-body px-3 py-1 flex-shrink-0 d-flex flex-wrap align-items-center gap-2" data-viewer-chrome="graph">
           <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="profiling-back-tools">
             ← Tools
           </button>
@@ -811,7 +1259,7 @@
           <button type="button" class="btn btn-sm btn-primary" id="profiling-refresh">Refresh corpus</button>
         </div>
 
-        <div class="flex-grow-1 overflow-hidden p-3 d-flex flex-column min-h-0" id="profiling-main-scroll">
+        <div class="flex-grow-1 overflow-hidden p-2 d-flex flex-column min-h-0" id="profiling-main-scroll">
           <div id="profiling-view-tools">
             <p class="small text-body-secondary">
               Review formal CLI examination captures and nugget graph proposals. Edit artifacts in the repo;
@@ -878,7 +1326,7 @@
           </div>
         </div>
 
-        <footer class="border-top px-3 py-2 small text-body-secondary flex-shrink-0" aria-live="polite">
+        <footer class="border-top px-3 py-1 small text-body-secondary flex-shrink-0" aria-live="polite">
           <span id="profiling-status-text">CLI profiling review UI.</span>
         </footer>
       </div>

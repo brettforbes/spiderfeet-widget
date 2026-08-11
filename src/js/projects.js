@@ -1,0 +1,1032 @@
+window.Widgets = window.Widgets || {};
+window.Widgets.Projects = window.Widgets.Projects || {};
+window.Widgets.Composer = window.Widgets.Composer || {};
+
+/**
+ * SPEC-011 AQ3–AQ4 / R11-03…R11-05 — Projects table + CRUD; row → Composer.
+ */
+(function ($, Projects, Composer, Widgets, SpiderfeetApi, document, window) {
+  'use strict';
+
+  Projects.selectorPanel = '[data-widget="projects-panel"]';
+  Projects.STORAGE_PROJECT_ID = 'spiderfeet.composer.projectId';
+  Projects.STORAGE_PROJECT = 'spiderfeet.composer.project';
+  Projects._loading = false;
+  Projects._loadedOnce = false;
+  Projects._projectsById = {};
+  Projects._modal = null;
+  Projects._busy = false;
+
+  Projects.escapeHtml = function (text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
+
+  Projects.setStatus = function (message) {
+    const el = document.getElementById('projects-status-text');
+    if (el) el.textContent = message;
+  };
+
+  Projects.setComposerStatus = function (message) {
+    const el = document.getElementById('composer-status-text');
+    if (el) el.textContent = message;
+  };
+
+  Projects.clearAlert = function () {
+    const el = document.getElementById('projects-alert');
+    if (!el) return;
+    el.className = 'px-3 pt-2 flex-shrink-0 d-none';
+    el.innerHTML = '';
+  };
+
+  Projects.showAlert = function (message, kind) {
+    const el = document.getElementById('projects-alert');
+    if (!el) return;
+    const variant = kind === 'success' ? 'success' : kind === 'warning' ? 'warning' : 'danger';
+    el.className = 'px-3 pt-2 flex-shrink-0';
+    el.innerHTML = `
+      <div class="alert alert-${variant} alert-dismissible fade show mb-0 py-2 small" role="alert">
+        ${Projects.escapeHtml(message || 'Something went wrong')}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>`;
+  };
+
+  Projects.projectId = function (project) {
+    if (!project || typeof project !== 'object') return '';
+    return project.id || project.project_id || '';
+  };
+
+  Projects.projectCreated = function (project) {
+    return (
+      project.project_created ||
+      project.created ||
+      project.created_at ||
+      project.createdAt ||
+      ''
+    );
+  };
+
+  Projects.projectName = function (project) {
+    return project.project_name || project.name || '';
+  };
+
+  Projects.projectDescription = function (project) {
+    return project.project_description || project.description || '';
+  };
+
+  Projects.workflowCount = function (project) {
+    if (typeof project.workflow_count === 'number') return project.workflow_count;
+    if (typeof project.workflows_count === 'number') return project.workflows_count;
+    if (Array.isArray(project.workflow_ids)) return project.workflow_ids.length;
+    if (Array.isArray(project.workflows)) return project.workflows.length;
+    return 0;
+  };
+
+  Projects.stixIncidentId = function (project) {
+    return (
+      project.stix_incident_id ||
+      project.stixIncidentId ||
+      project.stix_incident ||
+      ''
+    );
+  };
+
+  Projects.formatCreated = function (value) {
+    if (!value) return '—';
+    const raw = String(value);
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString();
+    }
+    return raw;
+  };
+
+  Projects.normalizeProject = function (payload, fallbackId) {
+    if (!payload || typeof payload !== 'object') {
+      return fallbackId ? { id: fallbackId, project_id: fallbackId } : null;
+    }
+    const nested =
+      payload.project && typeof payload.project === 'object'
+        ? payload.project
+        : payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+          ? payload.data
+          : payload;
+    const id = Projects.projectId(nested) || fallbackId || '';
+    if (!id) return nested;
+    return Object.assign({}, nested, { id, project_id: nested.project_id || id });
+  };
+
+  Projects.apiUnavailableMessage = function (action, result) {
+    const status = result && result.status;
+    if (status === 404) {
+      return `${action} is not available yet (v2 /projects returned 404).`;
+    }
+    if (result && result.stub) {
+      return `${action} is unavailable while the API is in stub mode.`;
+    }
+    return (result && result.message) || `${action} failed.`;
+  };
+
+  Projects.showLoading = function () {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="d-flex align-items-center justify-content-center py-5 text-body-secondary" role="status">
+        <div class="spinner-border spinner-border-sm me-2" aria-hidden="true"></div>
+        <span>Loading projects…</span>
+      </div>`;
+  };
+
+  Projects.showEmpty = function (message) {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    const note = message
+      ? `<p class="small text-body-secondary mb-0 mt-1">${Projects.escapeHtml(message)}</p>`
+      : '';
+    main.innerHTML = `
+      <div class="text-center py-5" id="projects-empty">
+        <p class="mb-0">No projects yet.</p>
+        ${note}
+      </div>`;
+  };
+
+  Projects.isBackendUnreachable = function (result, err) {
+    if (result && typeof result.status === 'number' && result.status === 0) return true;
+    const message = (result && result.message) || (err && err.message) || String(err || '');
+    return /networkerror|failed to fetch|load failed|network request failed|econnrefused/i.test(
+      message
+    );
+  };
+
+  Projects.showError = function (message) {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="alert alert-danger mb-0" role="alert" id="projects-error">
+        <strong>Could not load projects.</strong>
+        <div class="small mt-1">${Projects.escapeHtml(message || 'Unknown error')}</div>
+      </div>`;
+  };
+
+  Projects.showBackendUnreachable = function () {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="border rounded p-4 bg-body-tertiary" id="projects-unreachable" role="status">
+        <h3 class="h6 mb-2">Backend unreachable</h3>
+        <p class="small text-body-secondary mb-3 mb-md-2">
+          Is the SpiderFeet API running on <code>:8001</code>?
+          Start it from the <code>spiderfeet</code> repo with <code>./start.ps1</code>
+          (or your usual API start command), then retry.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" id="projects-retry-load">
+          Retry
+        </button>
+      </div>`;
+    const btn = document.getElementById('projects-retry-load');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        Projects.loadProjects({ forceRetry: true });
+      });
+    }
+  };
+
+  Projects.renderTable = function (projects) {
+    const main = document.getElementById('projects-main');
+    if (!main) return;
+    const showStix = projects.some((p) => !!Projects.stixIncidentId(p));
+    const rows = projects
+      .map((project) => {
+        const id = Projects.projectId(project);
+        const name = Projects.projectName(project) || id || '—';
+        const description = Projects.projectDescription(project) || '—';
+        const created = Projects.formatCreated(Projects.projectCreated(project));
+        const count = Projects.workflowCount(project);
+        const stix = Projects.stixIncidentId(project) || '—';
+        const stixCell = showStix
+          ? `<td class="small"><code class="small">${Projects.escapeHtml(stix)}</code></td>`
+          : '';
+        return `<tr class="projects-row" data-project-id="${Projects.escapeHtml(id)}" role="button" tabindex="0" title="Open in Composer (${Projects.escapeHtml(id)})">
+          <td class="small fw-semibold">${Projects.escapeHtml(name)}</td>
+          <td class="small text-body-secondary">${Projects.escapeHtml(description)}</td>
+          <td class="small text-nowrap">${Projects.escapeHtml(created)}</td>
+          <td class="small text-end">${Projects.escapeHtml(String(count))}</td>
+          ${stixCell}
+          <td class="text-end text-nowrap">
+            <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-project-action="edit" title="Edit project">
+              <i class="fa-solid fa-pen" aria-hidden="true"></i>
+              <span class="visually-hidden">Edit</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-project-action="delete" title="Delete project">
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              <span class="visually-hidden">Delete</span>
+            </button>
+          </td>
+        </tr>`;
+      })
+      .join('');
+
+    const stixHead = showStix ? '<th scope="col">STIX incident ID</th>' : '';
+    main.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0" id="projects-table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Description</th>
+              <th scope="col">Created</th>
+              <th scope="col" class="text-end">Workflows</th>
+              ${stixHead}
+              <th scope="col" class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>`;
+
+    Projects.bindTable(main);
+  };
+
+  Projects.selectProjectRow = function (projectId) {
+    Projects._selectedProjectId = projectId || null;
+    document.querySelectorAll('#projects-table .projects-row').forEach((row) => {
+      const selected = row.dataset.projectId === projectId;
+      row.classList.toggle('table-active', selected);
+      row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+  };
+
+  Projects.bindTable = function (root) {
+    root.querySelectorAll('.projects-row').forEach((row) => {
+      // R13-15: single-click selects; double-click opens in Composer.
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('[data-project-action]')) return;
+        const id = row.dataset.projectId;
+        if (id) Projects.selectProjectRow(id);
+      });
+      row.addEventListener('dblclick', (event) => {
+        if (event.target.closest('[data-project-action]')) return;
+        event.preventDefault();
+        const id = row.dataset.projectId;
+        if (id) Projects.openProjectInComposer(id);
+      });
+      row.addEventListener('keydown', (event) => {
+        if (event.target.closest('[data-project-action]')) return;
+        const id = row.dataset.projectId;
+        if (!id) return;
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          Projects.openProjectInComposer(id);
+          return;
+        }
+        if (event.key === ' ') {
+          event.preventDefault();
+          Projects.selectProjectRow(id);
+        }
+      });
+    });
+
+    root.querySelectorAll('[data-project-action]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = btn.closest('[data-project-id]');
+        const id = row && row.dataset.projectId;
+        if (!id) return;
+        const action = btn.dataset.projectAction;
+        if (action === 'edit') {
+          Projects.openEditModal(id);
+        } else if (action === 'delete') {
+          Projects.deleteProject(id);
+        }
+      });
+    });
+  };
+
+  Projects.loadProjects = async function (options) {
+    const opts = options || {};
+    if (Projects._loading) return;
+    Projects._loading = true;
+    Projects.showLoading();
+    Projects.setStatus('Loading projects…');
+
+    const applyFailure = (result, err) => {
+      if (Projects.isBackendUnreachable(result, err)) {
+        Projects.showBackendUnreachable();
+        Projects.setStatus('Backend unreachable — is the API running on :8001?');
+        if (!opts._autoRetried && !opts.forceRetry) {
+          window.setTimeout(() => {
+            Projects.loadProjects({ _autoRetried: true });
+          }, 1500);
+        }
+        return;
+      }
+      const message =
+        (result && result.message) || (err && err.message) || 'GET /projects failed';
+      Projects.showError(message);
+      Projects.setStatus(`Load failed: ${message}`);
+    };
+
+    try {
+      if (!SpiderfeetApi || typeof SpiderfeetApi.listProjects !== 'function') {
+        Projects.showError('SpiderfeetApi.listProjects is not available.');
+        Projects.setStatus('Projects API client missing.');
+        return;
+      }
+
+      const result = await SpiderfeetApi.listProjects();
+      if (!result || !result.ok) {
+        applyFailure(result, null);
+        return;
+      }
+
+      const projects = Array.isArray(result.projects) ? result.projects : [];
+      Projects._loadedOnce = true;
+      Projects._projectsById = {};
+      projects.forEach((project) => {
+        const normalized = Projects.normalizeProject(project);
+        const id = Projects.projectId(normalized);
+        if (id) Projects._projectsById[id] = normalized;
+      });
+
+      if (!projects.length) {
+        const emptyNote = result.stub
+          ? result.message || 'API returned an empty stub list.'
+          : '';
+        Projects.showEmpty(emptyNote);
+        Projects.renderComposerProjectMenu([]);
+        Projects.setStatus(result.stub ? 'No projects (stub).' : 'No projects.');
+        return;
+      }
+
+      Projects.renderTable(projects.map((p) => Projects.normalizeProject(p)));
+      Projects.renderComposerProjectMenu(
+        projects.map((p) => Projects.normalizeProject(p))
+      );
+      Projects.setStatus(
+        `${projects.length} project${projects.length === 1 ? '' : 's'}` +
+          (result.stub ? ' (stub)' : '')
+      );
+    } catch (err) {
+      applyFailure(null, err);
+    } finally {
+      Projects._loading = false;
+    }
+  };
+
+  Projects.getModal = function () {
+    const el = document.getElementById('projects-modal');
+    if (!el || !window.bootstrap || !window.bootstrap.Modal) return null;
+    if (!Projects._modal) {
+      Projects._modal = window.bootstrap.Modal.getOrCreateInstance(el);
+    }
+    return Projects._modal;
+  };
+
+  Projects.setFormError = function (message) {
+    const el = document.getElementById('projects-form-error');
+    if (!el) return;
+    if (!message) {
+      el.classList.add('d-none');
+      el.textContent = '';
+      return;
+    }
+    el.classList.remove('d-none');
+    el.textContent = message;
+  };
+
+  Projects.newProjectUuid = function () {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  Projects.nowIso = function () {
+    return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  };
+
+  Projects.openCreateModal = function () {
+    const title = document.getElementById('projects-modal-title');
+    const modeInput = document.getElementById('projects-form-mode');
+    const idInput = document.getElementById('projects-form-id');
+    const nameInput = document.getElementById('projects-form-name');
+    const descInput = document.getElementById('projects-form-description');
+    const createdInput = document.getElementById('projects-form-created');
+    const stixInput = document.getElementById('projects-form-stix');
+    const submit = document.getElementById('projects-form-submit');
+    if (title) title.textContent = 'New Project';
+    if (modeInput) modeInput.value = 'create';
+    if (idInput) idInput.value = `project--${Projects.newProjectUuid()}`;
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    if (createdInput) createdInput.value = Projects.nowIso();
+    if (stixInput) stixInput.value = '';
+    if (submit) submit.textContent = 'Create Project';
+    Projects.setFormError('');
+    Projects.clearAlert();
+    const modal = Projects.getModal();
+    if (modal) modal.show();
+    else Projects.showAlert('Bootstrap Modal is not available.');
+    if (nameInput) nameInput.focus();
+  };
+
+  Projects.openEditModal = function (projectId) {
+    const project = Projects._projectsById[projectId] || { id: projectId };
+    const title = document.getElementById('projects-modal-title');
+    const modeInput = document.getElementById('projects-form-mode');
+    const idInput = document.getElementById('projects-form-id');
+    const nameInput = document.getElementById('projects-form-name');
+    const descInput = document.getElementById('projects-form-description');
+    const createdInput = document.getElementById('projects-form-created');
+    const stixInput = document.getElementById('projects-form-stix');
+    const submit = document.getElementById('projects-form-submit');
+    if (title) title.textContent = 'Edit Project';
+    if (modeInput) modeInput.value = 'edit';
+    if (idInput) idInput.value = projectId;
+    if (nameInput) nameInput.value = Projects.projectName(project);
+    if (descInput) descInput.value = Projects.projectDescription(project);
+    if (createdInput) {
+      createdInput.value =
+        Projects.projectCreated(project) || Projects.formatCreated(Projects.projectCreated(project));
+    }
+    if (stixInput) stixInput.value = Projects.stixIncidentId(project);
+    if (submit) submit.textContent = 'Save';
+    Projects.setFormError('');
+    Projects.clearAlert();
+    const modal = Projects.getModal();
+    if (modal) modal.show();
+    else Projects.showAlert('Bootstrap Modal is not available.');
+  };
+
+  Projects.buildFormBody = function () {
+    const name = (document.getElementById('projects-form-name')?.value || '').trim();
+    const description = (
+      document.getElementById('projects-form-description')?.value || ''
+    ).trim();
+    const projectId = (document.getElementById('projects-form-id')?.value || '').trim();
+    const created = (document.getElementById('projects-form-created')?.value || '').trim();
+    const stix = (document.getElementById('projects-form-stix')?.value || '').trim();
+    const body = {
+      project_name: name,
+      project_description: description,
+    };
+    if (projectId) body.project_id = projectId;
+    if (created) body.project_created = created;
+    if (stix) body.stix_incident_id = stix;
+    return body;
+  };
+
+  Projects.submitForm = async function (event) {
+    event.preventDefault();
+    if (Projects._busy) return;
+    Projects._busy = true;
+    Projects.setFormError('');
+
+    const mode = (document.getElementById('projects-form-mode')?.value || 'create').trim();
+    const editId =
+      mode === 'edit'
+        ? (document.getElementById('projects-form-id')?.value || '').trim()
+        : '';
+    const body = Projects.buildFormBody();
+    if (!body.project_name) {
+      Projects.setFormError('Name is required.');
+      Projects._busy = false;
+      return;
+    }
+    const submit = document.getElementById('projects-form-submit');
+    if (submit) submit.disabled = true;
+
+    try {
+      let result;
+      if (editId) {
+        if (!SpiderfeetApi || typeof SpiderfeetApi.updateProject !== 'function') {
+          Projects.setFormError('SpiderfeetApi.updateProject is not available.');
+          return;
+        }
+        result = await SpiderfeetApi.updateProject(editId, body);
+        if (!result || !result.ok) {
+          Projects.setFormError(Projects.apiUnavailableMessage('Update project', result));
+          return;
+        }
+        Projects.getModal()?.hide();
+        Projects.showAlert(`Updated project ${editId}.`, 'success');
+        await Projects.loadProjects();
+      } else {
+        if (!SpiderfeetApi || typeof SpiderfeetApi.createProject !== 'function') {
+          Projects.setFormError('SpiderfeetApi.createProject is not available.');
+          return;
+        }
+        result = await SpiderfeetApi.createProject(body);
+        if (!result || !result.ok) {
+          Projects.setFormError(Projects.apiUnavailableMessage('Create project', result));
+          return;
+        }
+        const created = Projects.normalizeProject(result.data || result);
+        const createdId = Projects.projectId(created) || body.project_id || '(new)';
+        Projects.getModal()?.hide();
+        Projects.showAlert(`Created project ${createdId}.`, 'success');
+        await Projects.loadProjects();
+        // R13-14: redirect into Composer with the new project loaded.
+        if (createdId && createdId !== '(new)') {
+          await Projects.openProjectInComposer(createdId);
+        }
+      }
+    } catch (err) {
+      Projects.setFormError((err && err.message) || String(err));
+    } finally {
+      Projects._busy = false;
+      if (submit) submit.disabled = false;
+    }
+  };
+
+  Projects.deleteProject = async function (projectId) {
+    if (Projects._busy) return;
+    if (
+      !window.confirm(
+        `Delete project ${projectId}?\n\nThis cannot be undone. The list will refresh to verify removal.`
+      )
+    ) {
+      return;
+    }
+
+    Projects._busy = true;
+    Projects.clearAlert();
+    Projects.setStatus(`Deleting ${projectId}…`);
+
+    try {
+      if (!SpiderfeetApi || typeof SpiderfeetApi.deleteProject !== 'function') {
+        Projects.showAlert('SpiderfeetApi.deleteProject is not available.');
+        return;
+      }
+
+      const result = await SpiderfeetApi.deleteProject(projectId);
+      if (!result || !result.ok) {
+        Projects.showAlert(Projects.apiUnavailableMessage('Delete project', result));
+        Projects.setStatus('Delete failed.');
+        return;
+      }
+
+      await Projects.loadProjects();
+
+      const stillPresent = Boolean(Projects._projectsById[projectId]);
+      if (stillPresent) {
+        Projects.showAlert(
+          `Delete reported success, but ${projectId} still appears after refresh.`,
+          'warning'
+        );
+        Projects.setStatus('Delete not verified after refresh.');
+      } else {
+        Projects.showAlert(`Deleted project ${projectId} (verified by refresh).`, 'success');
+        Projects.setStatus(`Deleted ${projectId}.`);
+      }
+    } catch (err) {
+      Projects.showAlert((err && err.message) || String(err));
+      Projects.setStatus('Delete failed.');
+    } finally {
+      Projects._busy = false;
+    }
+  };
+
+  /**
+   * Persist Composer project selection (session + optional URL).
+   * @param {object|null} project
+   * @param {{ activateComposerTab?: boolean }} [options]
+   *   When true (e.g. double-click open), URL tab becomes composer.
+   *   Cold restore must NOT force tab=composer — Projects is the default landing tab.
+   */
+  Projects.persistSelectedProject = function (project, options) {
+    const id = Projects.projectId(project);
+    const activateComposerTab = !!(options && options.activateComposerTab);
+    Composer.selectedProjectId = id || null;
+    Composer.selectedProject = project || null;
+    try {
+      if (id) {
+        sessionStorage.setItem(Projects.STORAGE_PROJECT_ID, id);
+        sessionStorage.setItem(Projects.STORAGE_PROJECT, JSON.stringify(project));
+      } else {
+        sessionStorage.removeItem(Projects.STORAGE_PROJECT_ID);
+        sessionStorage.removeItem(Projects.STORAGE_PROJECT);
+      }
+    } catch (_err) {
+      /* ignore quota / private mode */
+    }
+
+    try {
+      const url = new URL(window.location.href);
+      if (id) {
+        url.searchParams.set('project', id);
+      } else {
+        url.searchParams.delete('project');
+      }
+      if (activateComposerTab) {
+        url.searchParams.set('tab', 'composer');
+      }
+      const tab = url.searchParams.get('tab') || 'projects';
+      history.replaceState(
+        { tab, projectId: id || null },
+        '',
+        url.toString()
+      );
+    } catch (_err) {
+      /* ignore */
+    }
+  };
+
+  /**
+   * Update Composer chrome (label / meta / status) without replacing the AR1 layout.
+   */
+  Projects.renderComposerProjectMenu = function (projects) {
+    const menu = document.getElementById('composer-project-menu');
+    if (!menu) return;
+    const addCheck = document.getElementById('composer-add-new-project');
+    const list = Array.isArray(projects) ? projects : Object.values(Projects._projectsById || {});
+    const selectedId =
+      Projects.projectId(Composer.selectedProject) || Projects._selectedProjectId || '';
+
+    // Keep the add-new checkbox + divider; replace the rest.
+    menu.querySelectorAll('[data-composer-project-item], #composer-project-menu-empty').forEach((n) => {
+      n.remove();
+    });
+
+    if (!list.length) {
+      const empty = document.createElement('li');
+      empty.id = 'composer-project-menu-empty';
+      empty.className = 'px-3 py-1 small text-body-secondary';
+      empty.textContent = 'No projects yet';
+      menu.appendChild(empty);
+    } else {
+      list.forEach((project) => {
+        const id = Projects.projectId(project);
+        if (!id) return;
+        const name = Projects.projectName(project) || id;
+        const li = document.createElement('li');
+        li.setAttribute('data-composer-project-item', '1');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'dropdown-item small' + (id === selectedId ? ' active' : '');
+        btn.dataset.projectId = id;
+        btn.textContent = name;
+        btn.title = id;
+        btn.addEventListener('click', () => {
+          if (addCheck) addCheck.checked = false;
+          Projects.openProjectInComposer(id);
+        });
+        li.appendChild(btn);
+        menu.appendChild(li);
+      });
+    }
+
+    if (addCheck && !addCheck.dataset.bound) {
+      addCheck.dataset.bound = '1';
+      addCheck.addEventListener('change', () => {
+        if (!addCheck.checked) return;
+        addCheck.checked = false;
+        // Close dropdown then open modal.
+        const toggle = document.getElementById('composer-project-dropdown');
+        if (toggle && window.bootstrap?.Dropdown) {
+          window.bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
+        }
+        Projects.openCreateModal();
+      });
+    }
+  };
+
+  Projects.refreshComposerProjectMenu = async function () {
+    // Prefer cached list; refresh from API when empty.
+    let list = Object.values(Projects._projectsById || {});
+    if (!list.length && SpiderfeetApi?.listProjects) {
+      const result = await SpiderfeetApi.listProjects();
+      if (result && result.ok) {
+        list = (result.projects || []).map((p) => Projects.normalizeProject(p));
+        Projects._projectsById = {};
+        list.forEach((p) => {
+          const id = Projects.projectId(p);
+          if (id) Projects._projectsById[id] = p;
+        });
+      }
+    }
+    Projects.renderComposerProjectMenu(list);
+  };
+
+  Projects.renderComposerPlaceholder = function (project, note) {
+    const label = document.getElementById('composer-project-label');
+    const meta = document.getElementById('composer-project-meta');
+    const id = Projects.projectId(project);
+    const name = Projects.projectName(project);
+
+    if (label) {
+      label.textContent = id ? name || `Project ${id}` : 'No project selected';
+    }
+
+    if (!id) {
+      if (meta) {
+        meta.textContent = '';
+        meta.classList.add('d-none');
+      }
+      Projects.setComposerStatus('No project selected. Choose one from Projects.');
+      return;
+    }
+
+    const stix = Projects.stixIncidentId(project) || '—';
+    const created = Projects.formatCreated(Projects.projectCreated(project));
+    const workflows = Projects.workflowCount(project);
+    if (meta) {
+      meta.textContent = `${created} · ${workflows} workflow(s) · STIX ${stix}`;
+      meta.classList.remove('d-none');
+      if (note) {
+        meta.title = note;
+      } else {
+        meta.removeAttribute('title');
+      }
+    }
+
+    Projects.setComposerStatus(
+      note ? `Loaded project ${id} (partial).` : `Loaded project ${id}.`
+    );
+  };
+
+  Projects.openProjectInComposer = async function (projectId) {
+    if (!projectId || Projects._busy) return;
+    Projects._busy = true;
+    Projects.clearAlert();
+    Projects.selectProjectRow(projectId);
+    Projects.setStatus(`Opening ${projectId}…`);
+
+    let project = Projects._projectsById[projectId]
+      ? Object.assign({}, Projects._projectsById[projectId])
+      : { id: projectId, project_id: projectId };
+    let note = '';
+
+    try {
+      // R13-15 / R13-06 — prefer /complete so Composer gets workflow_yaml inline.
+      if (SpiderfeetApi && typeof SpiderfeetApi.getProjectComplete === 'function') {
+        const complete = await SpiderfeetApi.getProjectComplete(projectId);
+        if (complete && complete.ok) {
+          const nested = complete.project || complete;
+          project = Projects.normalizeProject(nested, projectId);
+          const workflows = Array.isArray(complete.workflows) ? complete.workflows : [];
+          project.workflows = workflows;
+          const primary =
+            workflows.find((w) => w && w.workflow_yaml) || workflows[0] || null;
+          if (primary) {
+            project.workflow_yaml = primary.workflow_yaml || project.workflow_yaml;
+            project.primary_workflow_id =
+              primary.workflow_id || project.primary_workflow_id;
+            if (Widgets.Composer) {
+              Widgets.Composer.selectedWorkflow = primary;
+            }
+          }
+        } else if (SpiderfeetApi.getProject) {
+          const result = await SpiderfeetApi.getProject(projectId);
+          if (result && result.ok) {
+            project = Projects.normalizeProject(result, projectId);
+            note = 'Complete project endpoint unavailable; loaded base project.';
+          } else {
+            note = Projects.apiUnavailableMessage('Fetch project', complete || result);
+            note += ' Using list-row data for navigation.';
+          }
+        } else {
+          note = Projects.apiUnavailableMessage('Fetch project complete', complete);
+          note += ' Using list-row data for navigation.';
+        }
+      } else if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
+        const result = await SpiderfeetApi.getProject(projectId);
+        if (result && result.ok) {
+          project = Projects.normalizeProject(result, projectId);
+        } else {
+          note = Projects.apiUnavailableMessage('Fetch project', result);
+          note += ' Using list-row data for navigation.';
+        }
+      }
+    } catch (err) {
+      note = (err && err.message) || String(err);
+    }
+
+    // Latest Composer open becomes the session default + landing URL for this navigation.
+    Projects.persistSelectedProject(project, { activateComposerTab: true });
+    Projects.renderComposerPlaceholder(project, note || null);
+    Projects.refreshComposerProjectMenu();
+
+    if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+      Widgets.ComposerWorkflow.syncYamlFromComposer();
+    }
+
+    // SPEC-015 R15-16 — stop any prior poller, then paint persisted step statuses.
+    if (Widgets.Composer?.stopStatusPoller) {
+      Widgets.Composer.stopStatusPoller();
+    }
+    if (Widgets.Composer?.resetCliScanForProjectSwitch) {
+      Widgets.Composer.resetCliScanForProjectSwitch();
+    }
+    if (Widgets.Composer?.paintWorkflowStatuses) {
+      try {
+        await Widgets.Composer.paintWorkflowStatuses(
+          Widgets.Composer.resolveWorkflowId?.() ||
+            project.primary_workflow_id ||
+            null
+        );
+      } catch (err) {
+        console.warn('Projects.openProjectInComposer paintWorkflowStatuses', err);
+      }
+    }
+
+    // SPEC-016 B1 — temporary context is per-project; clear + reload on switch.
+    if (Widgets.Composer?.loadProjectContexts) {
+      try {
+        await Widgets.Composer.loadProjectContexts(projectId);
+      } catch (err) {
+        console.warn('Projects.openProjectInComposer loadProjectContexts', err);
+      }
+    }
+
+    if (Widgets.Shell && typeof Widgets.Shell.activateTab === 'function') {
+      Widgets.Shell.activateTab('composer');
+    }
+
+    Projects.setStatus(
+      note ? `Opened ${projectId} (partial).` : `Opened ${projectId} in Composer.`
+    );
+    if (note) {
+      Projects.showAlert(note, 'warning');
+    }
+    Projects._busy = false;
+  };
+
+  /**
+   * First project in the Projects table (stable list order), or null if empty.
+   * @returns {string|null}
+   */
+  Projects.firstProjectId = function () {
+    const list = Object.values(Projects._projectsById || {});
+    if (!list.length) return null;
+    // Prefer table row order when present.
+    const tbody = document.querySelector('#projects-table tbody');
+    if (tbody) {
+      const row = tbody.querySelector('tr[data-project-id]');
+      const id = row?.getAttribute('data-project-id');
+      if (id) return id;
+    }
+    const first = list[0];
+    return Projects.projectId(first) || null;
+  };
+
+  Projects.restoreComposerFromStorage = async function () {
+    let projectId = null;
+    try {
+      const url = new URL(window.location.href);
+      projectId = url.searchParams.get('project');
+    } catch (_err) {
+      /* ignore */
+    }
+    if (!projectId) {
+      try {
+        projectId = sessionStorage.getItem(Projects.STORAGE_PROJECT_ID);
+      } catch (_err) {
+        projectId = null;
+      }
+    }
+    // No prior session default → load first Projects-table row.
+    if (!projectId) {
+      if (!Object.keys(Projects._projectsById || {}).length) {
+        try {
+          await Projects.loadProjects();
+        } catch (_err) {
+          /* ignore */
+        }
+      }
+      projectId = Projects.firstProjectId();
+    }
+    if (!projectId) {
+      // Empty table: clear composer YAML / selection.
+      Projects.persistSelectedProject(null);
+      Projects.renderComposerPlaceholder(null);
+      if (Widgets.Composer) {
+        Widgets.Composer.selectedWorkflow = null;
+      }
+      if (Widgets.ComposerWorkflow?.setWorkflowYaml) {
+        Widgets.ComposerWorkflow.setWorkflowYaml('');
+      } else if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+        Widgets.ComposerWorkflow.syncYamlFromComposer();
+      }
+      return;
+    }
+
+    let cached = null;
+    try {
+      const raw = sessionStorage.getItem(Projects.STORAGE_PROJECT);
+      if (raw) cached = JSON.parse(raw);
+    } catch (_err) {
+      cached = null;
+    }
+
+    let project = Projects.normalizeProject(cached, projectId) || {
+      id: projectId,
+      project_id: projectId,
+    };
+    let note = '';
+
+    if (SpiderfeetApi && typeof SpiderfeetApi.getProjectComplete === 'function') {
+      const complete = await SpiderfeetApi.getProjectComplete(projectId);
+      if (complete && complete.ok) {
+        project = Projects.normalizeProject(complete.project || complete, projectId);
+        const workflows = Array.isArray(complete.workflows) ? complete.workflows : [];
+        project.workflows = workflows;
+        const primary =
+          workflows.find((w) => w && w.workflow_yaml) || workflows[0] || null;
+        if (primary) {
+          project.workflow_yaml = primary.workflow_yaml || project.workflow_yaml;
+          if (Widgets.Composer) Widgets.Composer.selectedWorkflow = primary;
+        }
+      } else {
+        note = Projects.apiUnavailableMessage('Re-fetch project complete', complete);
+      }
+    } else if (SpiderfeetApi && typeof SpiderfeetApi.getProject === 'function') {
+      const result = await SpiderfeetApi.getProject(projectId);
+      if (result && result.ok) {
+        project = Projects.normalizeProject(result, projectId);
+      } else {
+        note = Projects.apiUnavailableMessage('Re-fetch project', result);
+      }
+    }
+
+    Projects.persistSelectedProject(project);
+    Projects.renderComposerPlaceholder(project, note || null);
+    Projects.refreshComposerProjectMenu();
+
+    if (Widgets.ComposerWorkflow?.syncYamlFromComposer) {
+      Widgets.ComposerWorkflow.syncYamlFromComposer();
+    }
+
+    // SPEC-016 B1 — restore this project's temporary context (not the prior session's).
+    if (Widgets.Composer?.loadProjectContexts) {
+      try {
+        await Widgets.Composer.loadProjectContexts(projectId);
+      } catch (err) {
+        console.warn('Projects.restoreComposerFromStorage loadProjectContexts', err);
+      }
+    }
+  };
+
+  Projects.bindToolbar = function (root) {
+    root.querySelector('#projects-refresh')?.addEventListener('click', () => {
+      Projects.clearAlert();
+      Projects.loadProjects();
+    });
+    root.querySelector('#projects-new')?.addEventListener('click', () => {
+      Projects.openCreateModal();
+    });
+    root.querySelector('#projects-form')?.addEventListener('submit', (event) => {
+      Projects.submitForm(event);
+    });
+  };
+
+  Projects.enableComposerNav = function () {
+    const btn = document.querySelector('[data-shell-tab="composer"]');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.removeAttribute('title');
+  };
+
+  Projects.initPanel = function ($root) {
+    const el = $root[0];
+    if (el.dataset.initialized) return;
+    el.dataset.initialized = 'true';
+
+    Projects.enableComposerNav();
+    Projects.bindToolbar(el);
+
+    window.addEventListener('shell:tab-changed', (event) => {
+      if (event.detail?.tabId === 'projects') {
+        Projects.loadProjects();
+      }
+      if (event.detail?.tabId === 'composer') {
+        Projects.refreshComposerProjectMenu();
+        Projects.restoreComposerFromStorage();
+      }
+    });
+
+    // Default landing tab is Projects — load the table. Session project id is
+    // kept for Composer, but we no longer auto-switch to Composer on refresh.
+    Projects.loadProjects();
+  };
+
+  Widgets.watchDOMForComponent(Projects.selectorPanel, Projects.initPanel);
+})(
+  window.jQuery,
+  window.Widgets.Projects,
+  window.Widgets.Composer,
+  window.Widgets,
+  window.Widgets.SpiderfeetApi,
+  document,
+  window
+);
