@@ -800,42 +800,11 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
-   * Hook from Composer onScanComplete — import when export is scan_graph.
-   * @param {{ ok?: boolean, kind?: string, detail?: object, result?: object }} outcome
-   * @param {{ stepId?: string|null, yaml?: string }} [opts]
-   * @returns {{ subgraphId: string }|null}
+   * Deprecated — SPEC-017 B2: engine persists temps; host re-GETs the list.
+   * @returns {null}
    */
-  ComposerTempGraph.handleScanComplete = function (outcome, opts) {
-    if (!outcome || outcome.ok === false) return null;
-    if (outcome.kind && outcome.kind !== 'complete') return null;
-
-    const Composer = Widgets.Composer;
-    const wf = Widgets.ComposerWorkflow;
-    const stepId =
-      (opts && opts.stepId) ||
-      Composer?._selectedStepId ||
-      null;
-    const ownerId = (stepId && wf?.argvOwnerStepId?.(stepId)) || stepId;
-    const yaml =
-      (opts && opts.yaml) ||
-      wf?.getWorkflowYaml?.() ||
-      '';
-
-    const exportKind = ComposerTempGraph.parseStepContextExport(yaml, ownerId || '');
-    if (exportKind !== 'scan_graph') return null;
-
-    const detail = outcome.detail || null;
-    const result = outcome.result || null;
-    const graph =
-      detail?.graph_proposal ||
-      result?.graph_proposal ||
-      result?.graph_form ||
-      result?.graph ||
-      null;
-    if (!graph || typeof graph !== 'object') return null;
-
-    const imported = ComposerTempGraph.importScanGraph(graph, { stepId: ownerId });
-    return imported ? { subgraphId: imported.subgraphId } : null;
+  ComposerTempGraph.handleScanComplete = function () {
+    return null;
   };
 
   /** Ensure toggle strip is bound when Composer mounts. */
