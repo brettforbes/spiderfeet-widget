@@ -1228,10 +1228,14 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer._importedTempStepIds = new Set();
     const result = await temp.loadFromServer(pid);
     if (result?.ok) {
-      Composer.setStatus(
-        `Loaded temporary context for ${pid}` +
-          (result.nodeCount != null ? ` (${result.nodeCount} nodes)` : '')
-      );
+      const parts = [`Loaded temporary context for ${pid}`];
+      if (result.subgraphCount != null) {
+        parts.push(`${result.subgraphCount} subgraph${result.subgraphCount === 1 ? '' : 's'}`);
+      }
+      if (result.nodeCount != null) {
+        parts.push(`${result.nodeCount} nodes`);
+      }
+      Composer.setStatus(parts.join(' · '));
     } else if (result?.message) {
       console.warn('Composer.loadProjectContexts', result.message);
     }

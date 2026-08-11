@@ -2,14 +2,10 @@ window.Widgets = window.Widgets || {};
 window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
 
 /**
- * SPEC-011 AW1–AW3 / R11-18–R20 — Temporary Subgraph Viewer.
+ * SPEC-011 AW1–AW3 / SPEC-017 R17-07..09 — Temporary Subgraph Viewer.
  *
- * AW1: on completed step with `context.export: scan_graph`, assign each node a
- * fresh `temporary--<uuidv4>`, remap edges, append as a discrete subgraph.
- * AW2: render accumulated imports as discrete CanvasGraph clusters and provide
- * a per-subgraph remove toggle.
- * AW3 / R11-20: strip `temporary_id` on send and remap edges to
- * `nugget_instance_id` (aligns with SPEC-010 R10-25).
+ * Read-only consumer of GET /projects/{id}/contexts/temporary (multi-row list).
+ * Engine owns writes; viewer clears, loads all subgraphs, centres on chip click.
  */
 (function (ComposerTempGraph, Widgets, document, window) {
   'use strict';
@@ -29,6 +25,8 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   /** @type {Array<{
    *   subgraphId: string,
    *   stepId: string|null,
+   *   scanName: string|null,
+   *   scanDescription: string|null,
    *   importedAt: string,
    *   label: string,
    *   nodes: object[],
@@ -43,6 +41,90 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   /** @type {string|null} project id that owns `_temporarySubgraphId` / loaded graph */
   ComposerTempGraph._loadedForProjectId = null;
   ComposerTempGraph._sending = false;
+
+  /**
+   * Label for a server subgraph entry (scan_name preferred).
+   * @param {{ scan_name?: string, scan_description?: string|null, temporary_subgraph_id?: string }} entry
+   * @returns {string}
+   */
+  ComposerTempGraph.subgraphLabel = function (entry) {
+    if (!entry || typeof entry !== 'object') return 'subgraph';
+    const name = entry.scan_name != null ? String(entry.scan_name).trim() : '';
+    if (name) return name;
+    const desc =
+      entry.scan_description != null ? String(entry.scan_description).trim() : '';
+    if (desc) return desc;
+    const id = entry.temporary_subgraph_id || entry.subgraph_id;
+    return id ? String(id) : 'subgraph';
+  };
+
+  /**
+   * Normalize one API subgraph row for the viewer store (preserve server stamps).
+   * @param {object} entry
+   * @returns {{ subgraphId: string, stepId: string|null, scanName: string|null, scanDescription: string|null, label: string, nodes: object[], edges: object[] }|null}
+   */
+  ComposerTempGraph.normalizeServerSubgraph = function (entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const subgraphId =
+      entry.temporary_subgraph_id || entry.subgraph_id || `subgraph--${ComposerTempGraph.uuidv4()}`;
+    const scanName = entry.scan_name != null ? String(entry.scan_name) : null;
+    const scanDescription =
+      entry.scan_description != null ? String(entry.scan_description) : null;
+    const label = ComposerTempGraph.subgraphLabel(entry);
+    const stepId = scanName && scanName !== 'target' ? scanName : null;
+
+    const nodes = (Array.isArray(entry.nodes) ? entry.nodes : []).map((raw) => {
+      if (!raw || typeof raw !== 'object') return raw;
+      const node = Object.assign({}, raw);
+      const tid = node.temporary_id || node.id;
+      if (tid) {
+        node.temporary_id = String(tid);
+        node.id = String(tid);
+      }
+      node.subgraph_id = subgraphId;
+      if (scanName && node.source == null) node.source = scanName;
+      return node;
+    });
+
+    const edges = (Array.isArray(entry.edges) ? entry.edges : []).map((raw) => {
+      if (!raw || typeof raw !== 'object') return raw;
+      const edge = Object.assign({}, raw);
+      edge.subgraph_id = subgraphId;
+      if (scanName && edge.scan_name == null) edge.scan_name = scanName;
+      return edge;
+    });
+
+    return {
+      subgraphId: String(subgraphId),
+      stepId,
+      scanName,
+      scanDescription,
+      label,
+      nodes,
+      edges,
+    };
+  };
+
+  /**
+   * Replace in-memory subgraphs from a GET list payload (read-only).
+   * @param {object[]} subgraphEntries
+   * @returns {number} subgraph count loaded
+   */
+  ComposerTempGraph.loadSubgraphsFromList = function (subgraphEntries) {
+    ComposerTempGraph._subgraphs = [];
+    const list = Array.isArray(subgraphEntries) ? subgraphEntries : [];
+    list.forEach((entry) => {
+      const normalized = ComposerTempGraph.normalizeServerSubgraph(entry);
+      if (!normalized) return;
+      ComposerTempGraph._subgraphs.push(
+        Object.assign({}, normalized, {
+          importedAt: new Date().toISOString(),
+        })
+      );
+    });
+    ComposerTempGraph.refreshViewer();
+    return ComposerTempGraph._subgraphs.length;
+  };
 
   /**
    * Shared uuidv4 helper (browser crypto.randomUUID when available).
@@ -511,7 +593,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   }
 
   /**
-   * Render per-subgraph remove toggles (R11-19).
+   * Render per-subgraph centre chips (SPEC-017 R17-07 — read-only, no delete).
    */
   ComposerTempGraph.renderSubgraphToggles = function () {
     const list = document.getElementById('composer-temp-subgraph-list');
@@ -532,24 +614,16 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         ComposerTempGraph.SUBGRAPH_PALETTE[
           index % ComposerTempGraph.SUBGRAPH_PALETTE.length
         ];
-      const label = sg.label || `Import ${index + 1}`;
+      const label = sg.label || sg.scanName || `Import ${index + 1}`;
       const nodeCount = (sg.nodes || []).length;
-      const title = sg.stepId
-        ? `${label} · ${sg.stepId} (${nodeCount} nodes)`
-        : `${label} (${nodeCount} nodes)`;
+      const desc = sg.scanDescription ? ` — ${sg.scanDescription}` : '';
+      const title = `${label}${desc} (${nodeCount} nodes)`;
       return (
         `<button type="button" class="composer-temp-subgraph-chip d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-body" ` +
         `data-temp-subgraph-id="${escHtml(sg.subgraphId)}" style="border-left: 3px solid ${accent} !important;" ` +
         `title="Centre ${escHtml(title)} in the viewer">` +
-        `<span class="small text-truncate" style="max-width: 12rem;" title="${escHtml(title)}">${escHtml(label)}` +
-        (sg.stepId
-          ? ` <span class="text-body-secondary">· ${escHtml(sg.stepId)}</span>`
-          : '') +
+        `<span class="small text-truncate" style="max-width: 14rem;" title="${escHtml(title)}">${escHtml(label)}` +
         ` <span class="text-body-secondary">(${nodeCount})</span></span>` +
-        `<span role="button" tabindex="0" class="btn btn-sm btn-outline-secondary py-0 px-1" ` +
-        `data-temp-subgraph-remove="${escHtml(sg.subgraphId)}" ` +
-        `title="Remove ${escHtml(label)}" aria-label="Remove ${escHtml(label)}">` +
-        `<i class="fa-solid fa-xmark" aria-hidden="true"></i></span>` +
         `</button>`
       );
     });
@@ -580,7 +654,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
-   * Bind remove-toggle + Sync (strip-on-send) clicks once.
+   * Bind centre-chip clicks once (read-only viewer).
    */
   ComposerTempGraph.bindUi = function () {
     if (ComposerTempGraph._uiBound) return;
@@ -589,32 +663,11 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     const list = document.getElementById('composer-temp-subgraph-list');
     if (list) {
       list.addEventListener('click', (event) => {
-        const removeBtn = event.target?.closest?.('[data-temp-subgraph-remove]');
-        if (removeBtn) {
-          event.preventDefault();
-          event.stopPropagation();
-          const id = removeBtn.getAttribute('data-temp-subgraph-remove');
-          if (id) ComposerTempGraph.removeSubgraph(id);
-          return;
-        }
         const chip = event.target?.closest?.('[data-temp-subgraph-id]');
         if (!chip) return;
         event.preventDefault();
         const id = chip.getAttribute('data-temp-subgraph-id');
         if (id) ComposerTempGraph.centerSubgraph(id);
-      });
-    }
-
-    const syncBtn = document.getElementById('composer-temp-sync');
-    if (syncBtn) {
-      syncBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        ComposerTempGraph.sendToServer().catch((err) => {
-          console.warn('ComposerTempGraph.sendToServer failed', err);
-          Widgets.Composer?.setStatus?.(
-            `Temporary-context sync error: ${err?.message || err}`
-          );
-        });
       });
     }
   };
@@ -634,7 +687,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     const n = canvas.nodes.length;
     Composer.setStatus?.(
       count
-        ? `Temporary Subgraph Viewer: ${count} discrete import${count === 1 ? '' : 's'} (${n} nodes).`
+        ? `Temporary Subgraph Viewer: ${count} subgraph${count === 1 ? '' : 's'} (${n} nodes).`
         : 'Temporary Subgraph Viewer cleared.'
     );
   };
@@ -665,9 +718,9 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
-   * SPEC-016 B1 — replace the in-memory viewer from GET /contexts/temporary.
+   * SPEC-017 R17-07 — replace viewer from GET /contexts/temporary list.
    * @param {string} projectId
-   * @returns {Promise<{ ok: boolean, nodeCount?: number, message?: string }>}
+   * @returns {Promise<{ ok: boolean, subgraphCount?: number, nodeCount?: number, message?: string }>}
    */
   ComposerTempGraph.loadFromServer = async function (projectId) {
     const pid = ComposerTempGraph.resolveProjectId(projectId);
@@ -691,20 +744,25 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
             result?.detail || result?.error || result?.message || 'GET temporary context failed',
         };
       }
-      const sgId = result.subgraph_id || result.temporary_subgraph_id || null;
+
+      const subgraphs = Array.isArray(result.subgraphs) ? result.subgraphs : [];
+      const targetSg =
+        subgraphs.find((sg) => sg && String(sg.scan_name || '') === 'target') ||
+        subgraphs[0] ||
+        null;
+      const sgId =
+        targetSg?.temporary_subgraph_id ||
+        result.subgraph_id ||
+        result.temporary_subgraph_id ||
+        null;
       if (sgId) ComposerTempGraph._temporarySubgraphId = String(sgId);
 
-      const nodes = Array.isArray(result.nodes) ? result.nodes : [];
-      const edges = Array.isArray(result.edges) ? result.edges : [];
-      if (nodes.length || edges.length) {
-        ComposerTempGraph.importScanGraph(
-          { nodes, edges },
-          { stepId: null, sync: false }
-        );
-      } else {
-        ComposerTempGraph.refreshViewer();
-      }
-      return { ok: true, nodeCount: nodes.length };
+      const count = ComposerTempGraph.loadSubgraphsFromList(subgraphs);
+      let nodeCount = 0;
+      ComposerTempGraph._subgraphs.forEach((sg) => {
+        nodeCount += (sg.nodes || []).length;
+      });
+      return { ok: true, subgraphCount: count, nodeCount };
     } catch (err) {
       console.warn('ComposerTempGraph.loadFromServer', err);
       return { ok: false, message: (err && err.message) || String(err) };
@@ -738,13 +796,6 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     });
     ComposerTempGraph.refreshViewer();
 
-    // AW3 — round-trip stripped graph after each import when a project is open.
-    const shouldSync = meta?.sync !== false;
-    if (shouldSync && ComposerTempGraph.resolveProjectId()) {
-      ComposerTempGraph.sendToServer(null, { silent: true }).catch((err) => {
-        console.warn('ComposerTempGraph auto-sync failed', err);
-      });
-    }
     return subgraph;
   };
 
