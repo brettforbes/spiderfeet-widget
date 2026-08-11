@@ -803,6 +803,111 @@
           canvasSel.transition().duration(350).call(zoom.transform, next);
           return true;
         },
+        /**
+         * SPEC-017 R17-09 — pack node groups into a tight grid with small gaps.
+         * @param {{ gap?: number, padding?: number }} [opts]
+         * @returns {boolean}
+         */
+        packGroups(opts) {
+          const gap = opts?.gap != null ? Number(opts.gap) : 28;
+          const pad = opts?.padding != null ? Number(opts.padding) : 40;
+          const groupKeys = [...new Set(nodes.map((n) => n.group || 'default'))];
+          if (groupKeys.length <= 1 && nodes.length <= 1) return false;
+
+          /** @type {Array<{ group: string, members: object[], minX: number, minY: number, maxX: number, maxY: number, cx: number, cy: number }>} */
+          const boxes = groupKeys.map((group) => {
+            const members = nodes.filter((n) => (n.group || 'default') === group);
+            let minX = Infinity;
+            let minY = Infinity;
+            let maxX = -Infinity;
+            let maxY = -Infinity;
+            members.forEach((n) => {
+              const r = (n.iconSize || n.r || 10) / 2;
+              if (n.x - r < minX) minX = n.x - r;
+              if (n.y - r < minY) minY = n.y - r;
+              if (n.x + r > maxX) maxX = n.x + r;
+              if (n.y + r > maxY) maxY = n.y + r;
+            });
+            if (!Number.isFinite(minX)) {
+              minX = 0;
+              minY = 0;
+              maxX = 40;
+              maxY = 40;
+            }
+            return {
+              group,
+              members,
+              minX,
+              minY,
+              maxX,
+              maxY,
+              cx: (minX + maxX) / 2,
+              cy: (minY + maxY) / 2,
+              w: Math.max(maxX - minX, 24),
+              h: Math.max(maxY - minY, 24),
+            };
+          });
+
+          boxes.sort((a, b) => b.w * b.h - a.w * b.h);
+
+          const maxRowW = Math.max(width - pad * 2, 120);
+          let rowW = 0;
+          let rowH = 0;
+          /** @type {Array<Array<typeof boxes[0]>>} */
+          const rows = [[]];
+
+          boxes.forEach((box) => {
+            const needGap = rows[rows.length - 1].length ? gap : 0;
+            if (rows[rows.length - 1].length && rowW + needGap + box.w > maxRowW) {
+              rows.push([]);
+              rowW = 0;
+              rowH = 0;
+            }
+            const row = rows[rows.length - 1];
+            const g = row.length ? gap : 0;
+            row.push(Object.assign({}, box, { rowOffsetX: rowW + g + box.w / 2 }));
+            rowW += g + box.w;
+            rowH = Math.max(rowH, box.h);
+            row[row.length - 1].rowH = rowH;
+          });
+
+          const totalH = rows.reduce((sum, row, i) => {
+            const rh = row.reduce((m, b) => Math.max(m, b.h), 24);
+            return sum + rh + (i ? gap : 0);
+          }, 0);
+          let yCursor = height / 2 - totalH / 2;
+
+          rows.forEach((row) => {
+            const rh = row.reduce((m, b) => Math.max(m, b.h), 24);
+            const rowSpan = row[row.length - 1]?.rowOffsetX
+              ? row[row.length - 1].rowOffsetX + row[row.length - 1].w / 2
+              : 0;
+            const rowStartX = width / 2 - rowSpan / 2;
+            row.forEach((box) => {
+              const targetCx = rowStartX + box.rowOffsetX;
+              const targetCy = yCursor + rh / 2;
+              const dx = targetCx - box.cx;
+              const dy = targetCy - box.cy;
+              box.members.forEach((n) => {
+                const nx = n.x + dx;
+                const ny = n.y + dy;
+                n.x = nx;
+                n.y = ny;
+                pinNode(n.id, nx, ny);
+              });
+            });
+            yCursor += rh + gap;
+          });
+
+          if (worker) postWorker({ type: 'reheat' });
+          else if (simulation) simulation.alpha(1).restart();
+
+          centerOnNodes(
+            nodes.map((n) => n.id),
+            { padding: pad }
+          );
+          return true;
+        },
         pinNode,
         unpinNode,
         restart() {

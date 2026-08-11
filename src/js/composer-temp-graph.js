@@ -654,6 +654,23 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   /**
+   * SPEC-017 R17-09 — pack discrete subgraph clusters in the temp viewer.
+   * @returns {boolean}
+   */
+  ComposerTempGraph.packSubgraphClusters = function () {
+    const api = Widgets.Composer?.getCanvasGraph?.('temp-subgraph');
+    if (!api?.packGroups) return false;
+    const ok = api.packGroups({ gap: 24, padding: 36 });
+    if (ok) {
+      const count = ComposerTempGraph._subgraphs.length;
+      Widgets.Composer?.setStatus?.(
+        `Packed ${count} temporary subgraph cluster${count === 1 ? '' : 's'} for fullscreen view.`
+      );
+    }
+    return ok;
+  };
+
+  /**
    * Bind centre-chip clicks once (read-only viewer).
    */
   ComposerTempGraph.bindUi = function () {
@@ -668,6 +685,14 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         event.preventDefault();
         const id = chip.getAttribute('data-temp-subgraph-id');
         if (id) ComposerTempGraph.centerSubgraph(id);
+      });
+    }
+
+    const clusterBtn = document.getElementById('composer-temp-cluster');
+    if (clusterBtn) {
+      clusterBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        ComposerTempGraph.packSubgraphClusters();
       });
     }
   };
