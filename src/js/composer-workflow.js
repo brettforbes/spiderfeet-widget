@@ -880,6 +880,42 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
     }
   };
 
+  /**
+   * Contrast ink for a #RRGGBB background (Composer status legend swatches).
+   * @param {string} hex
+   * @returns {'#222'|'#fff'}
+   */
+  ComposerWorkflow._contrastInk = function (hex) {
+    const m = String(hex || '').trim().match(/^#([0-9a-fA-F]{6})$/);
+    if (!m) return '#222';
+    const n = parseInt(m[1], 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    const y = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return y > 0.55 ? '#222' : '#fff';
+  };
+
+  /**
+   * Apply YAML DSL status colors to Composer title-bar legend badges.
+   * @param {{ waiting?: string, running?: string, complete?: string, failed?: string }|null|undefined} colors
+   */
+  ComposerWorkflow.applyStatusLegendColors = function (colors) {
+    const legend = document.getElementById('composer-status-legend');
+    if (!legend || !colors || typeof colors !== 'object') return;
+    const keys = ['waiting', 'running', 'complete', 'failed'];
+    keys.forEach((key) => {
+      const hex = colors[key];
+      if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex.trim())) return;
+      const value = hex.trim().toLowerCase();
+      legend.style.setProperty(`--composer-status-${key}`, value);
+      legend.style.setProperty(
+        `--composer-status-${key}-ink`,
+        ComposerWorkflow._contrastInk(value)
+      );
+    });
+  };
+
   ComposerWorkflow._handleWidgetMessage = function (event) {
     const expected = ComposerWorkflow._expectedOrigin || ComposerWorkflow._widgetOrigin();
     if (expected && event.origin && event.origin !== expected) {
@@ -954,6 +990,19 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
           }
         }
         ComposerWorkflow._dispatch('composer-workflow:theme-changed', { theme });
+        break;
+      }
+      case 'statusColorsChanged': {
+        // YAML DSL settings → Composer title-bar status legend (SPEC-017).
+        const colors =
+          data.payload && typeof data.payload.colors === 'object'
+            ? data.payload.colors
+            : data.payload;
+        ComposerWorkflow.applyStatusLegendColors(colors);
+        ComposerWorkflow._dispatch('composer-workflow:status-colors-changed', {
+          theme: data.payload?.theme,
+          colors,
+        });
         break;
       }
       case 'stepSelected': {

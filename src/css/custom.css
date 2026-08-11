@@ -882,7 +882,13 @@ body {
   margin: 1.25rem 0;
 }
 
-/* SPEC-015 R15-17 — Composer chrome status legend (matches DAG glyphs). */
+/* SPEC-015 R15-17 — Composer chrome status legend (synced from YAML DSL settings). */
+.composer-status-legend {
+  --composer-status-waiting: #ffff99;
+  --composer-status-running: #f2aa84;
+  --composer-status-complete: #4e95d9;
+  --composer-status-failed: #ff7979;
+}
 .composer-status-legend .composer-status-swatch {
   display: inline-flex;
   align-items: center;
@@ -897,20 +903,20 @@ body {
   color: var(--bs-body-color);
 }
 .composer-status-legend .composer-status-swatch[data-status='waiting'] {
-  background: #cfe2ff;
-  color: #084298;
+  background: var(--composer-status-waiting);
+  color: var(--composer-status-waiting-ink, #222);
 }
 .composer-status-legend .composer-status-swatch[data-status='running'] {
-  background: #6ea8fe;
-  color: #052c65;
+  background: var(--composer-status-running);
+  color: var(--composer-status-running-ink, #222);
 }
 .composer-status-legend .composer-status-swatch[data-status='complete'] {
-  background: #0d6efd;
-  color: #fff;
+  background: var(--composer-status-complete);
+  color: var(--composer-status-complete-ink, #fff);
 }
 .composer-status-legend .composer-status-swatch[data-status='failed'] {
-  background: #dc3545;
-  color: #fff;
+  background: var(--composer-status-failed);
+  color: var(--composer-status-failed-ink, #fff);
 }
 
 /* SPEC-011 AR1 — Composer 4-region layout (12-column left/right model) */
