@@ -572,11 +572,32 @@ window.Widgets.SpiderfeetApi = window.Widgets.SpiderfeetApi || {};
 
   // —— Contexts ————————————————————————————————————————————————
 
-  // SPEC-010 AN2 / R10-24–25 — contexts live under /contexts/{temporary|project}.
-  SpiderfeetApi.getTemporaryContext = function (projectId) {
-    return SpiderfeetApi.request(
+  /**
+   * SPEC-017 R17-04 / R17-07 — list all project temporary subgraphs.
+   * Normalizes `{ project_id, subgraphs: [{ temporary_subgraph_id, scan_name, scan_description, nodes, edges }] }`.
+   * @param {string} projectId
+   * @returns {Promise<object>}
+   */
+  SpiderfeetApi.getTemporaryContext = async function (projectId) {
+    const result = await SpiderfeetApi.request(
       `/projects/${encodeURIComponent(projectId)}/contexts/temporary`
     );
+    if (!result || result.ok === false) return result;
+    const subgraphs = Array.isArray(result.subgraphs)
+      ? result.subgraphs
+      : result.nodes != null || result.edges != null
+        ? [
+            {
+              temporary_subgraph_id:
+                result.temporary_subgraph_id || result.subgraph_id || null,
+              scan_name: result.scan_name || 'legacy',
+              scan_description: result.scan_description || null,
+              nodes: Array.isArray(result.nodes) ? result.nodes : [],
+              edges: Array.isArray(result.edges) ? result.edges : [],
+            },
+          ]
+        : [];
+    return Object.assign({}, result, { subgraphs });
   };
 
   SpiderfeetApi.updateTemporaryContext = function (projectId, body) {
