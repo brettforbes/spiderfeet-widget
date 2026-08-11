@@ -503,16 +503,6 @@
                 <h3 class="h6 small text-uppercase text-body-secondary mb-0 me-auto">Temporary Subgraph Viewer</h3>
                 <button
                   type="button"
-                  class="btn btn-sm btn-outline-primary"
-                  id="composer-temp-sync"
-                  title="Send temporary graph to server (strips temporary_id; remaps to nugget_instance_id)"
-                  aria-label="Sync temporary graph to server"
-                >
-                  <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
-                  <span class="ms-1">Sync</span>
-                </button>
-                <button
-                  type="button"
                   class="btn btn-sm btn-outline-secondary"
                   id="composer-temp-expand"
                   data-composer-expand="temp-subgraph"
@@ -523,7 +513,7 @@
                   <i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true" data-composer-expand-icon></i>
                 </button>
               </div>
-              <!-- AW2 / R11-19 — per-import remove toggles for discrete temporary subgraphs -->
+              <!-- SPEC-017 R17-07 — per-subgraph centre chips (read-only; no delete) -->
               <div
                 id="composer-temp-subgraph-list"
                 class="composer-temp-subgraph-list border-bottom px-2 py-1 flex-shrink-0 d-flex flex-wrap align-items-center gap-1"
