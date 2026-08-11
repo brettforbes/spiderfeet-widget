@@ -40,8 +40,6 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._runBlockedUntilReset = false;
   /** True while Reset Workflow is in flight (SPEC-015 R15-16). */
   Composer._workflowResetBusy = false;
-  /** SPEC-017 R17-10 — Run locked after terminal workflow run until Reset. */
-  Composer._runLockedUntilReset = false;
   /** SPEC-015 — single active status poller handle. */
   Composer._statusPoller = null;
   /** SPEC-017 B2 — step ids that already triggered a temp list re-GET this run. */
@@ -341,6 +339,25 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (Composer._workflowRunBusy) return false;
     if (Composer._runBlockedUntilReset) return false;
     return !!(validation && validation.ok);
+  };
+
+  /**
+   * SPEC-017 R17-10 — derive Run lock from workflow status / reset response.
+   * @param {{ run_state?: string, run_ready?: boolean, status?: string }|null|undefined} statusPayload
+   */
+  Composer.applyRunLockFromStatus = function (statusPayload) {
+    if (!statusPayload || typeof statusPayload !== 'object') return;
+    if (
+      statusPayload.run_ready === true ||
+      String(statusPayload.status || '').toUpperCase() === 'RESET'
+    ) {
+      Composer._runBlockedUntilReset = false;
+      return;
+    }
+    const runState = String(statusPayload.run_state || '').toLowerCase();
+    if (runState && Composer.TERMINAL_RUN_STATES[runState]) {
+      Composer._runBlockedUntilReset = true;
+    }
   };
 
   /** Central viewer panes that support full-screen expand (R11-07) + CanvasGraph (R11-08). */
@@ -1016,6 +1033,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     Composer.applyValidationToRunWorkflow(validation);
     Composer.setStatus(`Syncing workflow YAML for ${workflowId}…`);
 
+    /** @type {object|null} */
+    let terminalPayload = null;
     try {
       const sync = await Composer.persistEditorWorkflowYaml({
         reason: 'Run Workflow',
@@ -1050,7 +1069,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         `Workflow ${workflowId} running (run ${runId}) — live DAG status updating…`
       );
 
-      const finalPayload = await new Promise((resolve, reject) => {
+      terminalPayload = await new Promise((resolve, reject) => {
         let settled = false;
         Composer.startStatusPoller(workflowId, {
           onUpdate(payload) {
@@ -1087,7 +1106,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         }
       });
 
-      const result = Composer._statusToExecuteResult(workflowId, finalPayload);
+      const result = Composer._statusToExecuteResult(workflowId, terminalPayload);
       let subgraphCount = null;
       try {
         const reload = await Composer.reloadTemporaryContextFromServer(projectId, {
@@ -1100,7 +1119,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         console.warn('Composer.runWorkflow terminal temp reload', err);
       }
 
-      const runErr = finalPayload?.error ? String(finalPayload.error) : '';
+      const runErr = terminalPayload?.error ? String(terminalPayload.error) : '';
       const parts = [
         result.message || `Workflow ${workflowId} finished (${result.status || 'done'})`,
       ];
@@ -1117,8 +1136,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         );
       }
       Composer.setStatus(parts.join(' · '));
-      // SPEC-017 R17-10 — require Reset before another Run.
-      Composer._runBlockedUntilReset = true;
+      Composer.applyRunLockFromStatus(terminalPayload);
       return result;
     } catch (err) {
       Composer.stopStatusPoller();
@@ -1129,7 +1147,9 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       return null;
     } finally {
       Composer._workflowRunBusy = false;
-      Composer.applyRunLockFromStatus(finalPayload);
+      if (terminalPayload) {
+        Composer.applyRunLockFromStatus(terminalPayload);
+      }
       const last =
         Widgets.ComposerWorkflow?.getLastValidation?.() ||
         Widgets.ComposerWorkflow?._lastValidation ||
@@ -1190,6 +1210,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         needsByStep: Composer._workflowNeedsByStep,
       });
       Widgets.ComposerWorkflow?.setStepStatuses?.(map);
+      Composer.applyRunLockFromStatus(payload);
+      const lastVal =
+        Widgets.ComposerWorkflow?.getLastValidation?.() ||
+        Widgets.ComposerWorkflow?._lastValidation ||
+        null;
+      Composer.applyValidationToRunWorkflow(lastVal);
       return map;
     } catch (err) {
       console.warn('Composer.paintWorkflowStatuses', err);
@@ -1203,6 +1229,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    */
   Composer.resetCliScanForProjectSwitch = function () {
     Composer._stepSelectSeq = (Composer._stepSelectSeq || 0) + 1;
+    Composer._runBlockedUntilReset = false;
     Composer._selectedToolId = null;
     Composer._selectedStepId = null;
     Composer._cliScanHasRun = false;
@@ -1308,8 +1335,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       // Backend rematerialized UNKNOWN shells — paint waiting for all steps.
       await Composer.paintWorkflowStatuses(workflowId);
 
-      // SPEC-017 R17-10 — Reset re-enables Run (backend returns run_ready).
-      Composer._runBlockedUntilReset = false;
+      // SPEC-017 R17-10 — Reset re-enables Run when backend returns run_ready.
+      Composer.applyRunLockFromStatus(result);
       const lastVal =
         Widgets.ComposerWorkflow?.getLastValidation?.() ||
         Widgets.ComposerWorkflow?._lastValidation ||
