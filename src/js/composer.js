@@ -1065,6 +1065,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
       const runId = accepted.run_id || accepted.runId || '?';
       Composer._reloadedTempStepIds = new Set();
+      // SPEC-017 R17-03 — target temp is created as Run starts / Target colour changes.
+      Composer.reloadTemporaryContextFromServer(projectId, {
+        reason: 'Run Workflow start',
+      }).catch((err) => {
+        console.warn('Composer.runWorkflow start temp reload', err);
+      });
       Composer.setStatus(
         `Workflow ${workflowId} running (run ${runId}) — live DAG status updating…`
       );
@@ -1346,7 +1352,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       const steps = result.steps_reset != null ? result.steps_reset : '?';
       Composer.setStatus(
         result.message ||
-          `Workflow ${workflowId} reset — ${steps} step(s) unscanned; temporary context cleared.`
+          `Workflow ${workflowId} reset — ${steps} step(s) unscanned; temporary subgraphs cleared (target reappears on next Run / Scan Now).`
       );
       return result;
     } catch (err) {

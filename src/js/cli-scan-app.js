@@ -445,6 +445,14 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
           state,
           `Scanning ${ctx.stepId} (run ${accepted.run_id || '?'}) — live DAG status…`
         );
+        // SPEC-017 R17-03 — first Scan Now seeds target temp with Target colour change.
+        if (ctx.projectId && typeof Widgets.Composer?.reloadTemporaryContextFromServer === 'function') {
+          Widgets.Composer.reloadTemporaryContextFromServer(ctx.projectId, {
+            reason: 'Scan Now start',
+          }).catch((err) => {
+            console.warn('CliScanApp.runScanNow start temp reload', err);
+          });
+        }
         const finalStatus = await new Promise((resolve, reject) => {
           Widgets.Composer.startStatusPoller(ctx.workflowId, {
             onUpdate(payload) {
@@ -501,6 +509,18 @@ window.Widgets.CliScanApp = window.Widgets.CliScanApp || {};
         };
       } else {
         result = await api.executeStep(ctx.workflowId, ctx.stepId, body);
+        if (
+          result &&
+          result.ok !== false &&
+          ctx.projectId &&
+          typeof Widgets.Composer?.reloadTemporaryContextFromServer === 'function'
+        ) {
+          Widgets.Composer.reloadTemporaryContextFromServer(ctx.projectId, {
+            reason: 'Scan Now sync',
+          }).catch((err) => {
+            console.warn('CliScanApp.runScanNow sync temp reload', err);
+          });
+        }
       }
     } catch (err) {
       Widgets.Composer?.stopStatusPoller?.();
