@@ -1104,10 +1104,11 @@ window.Widgets.ComposerWorkflow = window.Widgets.ComposerWorkflow || {};
   };
 
   /**
-   * SPEC-015 R15-13 — push live step status map into the DAG iframe.
+   * SPEC-015 R15-13 / SPEC-018 R18-15 — push live step status map into the DAG iframe.
    * Replace-semantics: pass `{}` / null / undefined to clear.
+   * Values may be legacy strings or `{ status, input_done?, input_total? }` objects for i/n badges.
    * No-ops safely before iframe `ready`.
-   * @param {Record<string, 'waiting'|'running'|'complete'|'failed'>|null|undefined} statuses
+   * @param {Record<string, 'waiting'|'running'|'complete'|'failed'|{ status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }>|null|undefined} statuses
    * @returns {boolean}
    */
   ComposerWorkflow.setStepStatuses = function (statuses) {

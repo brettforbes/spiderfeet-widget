@@ -61,7 +61,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   /** yaml-workflow-widget chrome node ids (mapper.js). */
   Composer.WORKFLOW_START_ID = '__workflow_start__';
   Composer.WORKFLOW_TARGET_ID = '__workflow_target__';
-  /** @type {Record<string, 'waiting'|'running'|'complete'|'failed'>} */
+  /** @type {Record<string, { status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }>} */
   Composer._lastStatusMap = {};
   /** @type {Record<string, string[]>} */
   Composer._workflowNeedsByStep = {};
@@ -77,6 +77,45 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     if (s === 'ERROR-FAILED') return 'failed';
     if (s === 'STARTING' || s === 'RUNNING') return 'running';
     return 'waiting';
+  };
+
+  /**
+   * Normalize a setStepStatuses entry (object or legacy string) to UI status.
+   * @param {string|{ status?: string }|null|undefined} entry
+   * @returns {'waiting'|'running'|'complete'|'failed'}
+   */
+  Composer._stepStatusUi = function (entry) {
+    if (entry == null) return 'waiting';
+    if (typeof entry === 'string') return entry;
+    const status = entry.status;
+    if (
+      status === 'waiting' ||
+      status === 'running' ||
+      status === 'complete' ||
+      status === 'failed'
+    ) {
+      return status;
+    }
+    return 'waiting';
+  };
+
+  /**
+   * Build one setStepStatuses object from a backend status step row (R18-15).
+   * @param {{ scan_status?: string, input_done?: number|null, input_total?: number|null }} step
+   * @returns {{ status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }}
+   */
+  Composer._stepStatusFromPayload = function (step) {
+    /** @type {{ status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }} */
+    const entry = {
+      status: Composer.mapScanStatusToUi(step?.scan_status),
+    };
+    const total = step?.input_total;
+    const done = step?.input_done;
+    if (total != null || done != null) {
+      entry.input_total = total != null ? Number(total) : 0;
+      entry.input_done = done != null ? Number(done) : 0;
+    }
+    return entry;
   };
 
   /**
@@ -106,15 +145,15 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    * Map GET /workflows/{id}/status → DAG UI statuses with Start/Target chrome,
    * ready-descendant promotion, and no complete/failed→waiting downgrade.
    * @param {{
-   *   steps?: Array<{step_id?: string, stepId?: string, scan_status?: string}>,
+   *   steps?: Array<{step_id?: string, stepId?: string, scan_status?: string, input_done?: number|null, input_total?: number|null}>,
    *   run_state?: string
    * }|null|undefined} statusPayload
    * @param {{
-   *   previousMap?: Record<string, string>,
+   *   previousMap?: Record<string, { status?: string, input_done?: number, input_total?: number }|string>,
    *   needsByStep?: Record<string, string[]>,
    *   yaml?: string
    * }|null} [options]
-   * @returns {Record<string, 'waiting'|'running'|'complete'|'failed'>}
+   * @returns {Record<string, { status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }>}
    */
   Composer.statusPayloadToMap = function (statusPayload, options) {
     const opts = options || {};
@@ -137,20 +176,20 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       needsByStep = Composer.refreshWorkflowNeeds(opts.yaml);
     }
 
-    /** @type {Record<string, 'waiting'|'running'|'complete'|'failed'>} */
+    /** @type {Record<string, { status: 'waiting'|'running'|'complete'|'failed', input_done?: number, input_total?: number }>} */
     const map = {};
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
       const stepId = step?.step_id || step?.stepId;
       if (!stepId) continue;
-      map[String(stepId)] = Composer.mapScanStatusToUi(step.scan_status);
+      map[String(stepId)] = Composer._stepStatusFromPayload(step);
     }
 
     // Ensure YAML-known steps appear even before the backend lists them.
     const knownIds = Object.keys(needsByStep || {});
     for (let i = 0; i < knownIds.length; i += 1) {
       const id = knownIds[i];
-      if (map[id] == null) map[id] = 'waiting';
+      if (map[id] == null) map[id] = { status: 'waiting' };
     }
 
     // Never downgrade terminal chrome during an active run (httpx flicker fix).
@@ -158,12 +197,16 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       const prevIds = Object.keys(prev);
       for (let i = 0; i < prevIds.length; i += 1) {
         const id = prevIds[i];
-        const was = prev[id];
+        const was = Composer._stepStatusUi(prev[id]);
+        const cur = Composer._stepStatusUi(map[id]);
         if (
           (was === 'complete' || was === 'failed') &&
-          (map[id] == null || map[id] === 'waiting')
+          (map[id] == null || cur === 'waiting')
         ) {
-          map[id] = was;
+          map[id] =
+            typeof prev[id] === 'object' && prev[id] != null
+              ? Object.assign({}, prev[id])
+              : { status: was };
         }
       }
     }
@@ -181,20 +224,26 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         ) {
           return;
         }
-        const cur = map[stepId] || 'waiting';
+        const cur = Composer._stepStatusUi(map[stepId]);
         if (cur !== 'waiting') return;
         const needs = (needsByStep && needsByStep[stepId]) || [];
         const ready =
           needs.length === 0
             ? true
-            : needs.every((needId) => map[String(needId)] === 'complete');
-        if (ready) map[stepId] = 'running';
+            : needs.every(
+                (needId) => Composer._stepStatusUi(map[String(needId)]) === 'complete'
+              );
+        if (ready) {
+          map[stepId] = Object.assign({}, map[stepId] || { status: 'waiting' }, {
+            status: 'running',
+          });
+        }
       });
     }
 
     if (active || terminal) {
-      map[Composer.WORKFLOW_START_ID] = 'complete';
-      map[Composer.WORKFLOW_TARGET_ID] = 'complete';
+      map[Composer.WORKFLOW_START_ID] = { status: 'complete' };
+      map[Composer.WORKFLOW_TARGET_ID] = { status: 'complete' };
     }
 
     Composer._lastStatusMap = Object.assign({}, map);
@@ -1223,7 +1272,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
   /**
    * SPEC-015 R15-16 — clear DAG status chrome (all waiting / empty map).
-   * @param {Record<string, string>|null} [statuses] optional explicit map; default clear
+   * @param {Record<string, { status?: string, input_done?: number, input_total?: number }>|null} [statuses] optional explicit map; default clear
    */
   Composer.clearWorkflowStatuses = function (statuses) {
     Composer.stopStatusPoller();
@@ -1242,7 +1291,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   /**
    * SPEC-015 R15-16 — one-shot paint of persisted step statuses (project open / restore).
    * @param {string} [workflowId]
-   * @returns {Promise<Record<string, string>|null>}
+   * @returns {Promise<Record<string, { status: string, input_done?: number, input_total?: number }>|null>}
    */
   Composer.paintWorkflowStatuses = async function (workflowId) {
     const id = String(workflowId || Composer.resolveWorkflowId() || '').trim();
