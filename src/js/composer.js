@@ -46,6 +46,8 @@ window.Widgets.Composer = window.Widgets.Composer || {};
   Composer._reloadedTempStepIds = new Set();
   /** In-flight guard for coalesced temporary-context reloads. */
   Composer._tempListReloadPromise = null;
+  /** Set when a FINISHED step arrives while a temp GET is in flight (D3). */
+  Composer._tempListReloadFollowUp = false;
   /** Poll interval for live DAG status (R15-14). */
   Composer.STATUS_POLL_MS = 1000;
   Composer.STATUS_POLL_MAX_BACKOFF_MS = 8000;
@@ -935,24 +937,35 @@ window.Widgets.Composer = window.Widgets.Composer || {};
       return Composer._tempListReloadPromise;
     }
 
-    Composer._tempListReloadPromise = temp
-      .loadFromServer(pid)
-      .then((result) => {
-        if (result?.ok) {
-          const n = result.subgraphCount != null ? result.subgraphCount : '?';
-          const reason = opts?.reason ? ` (${opts.reason})` : '';
-          Composer.setStatus?.(
-            `Temporary subgraphs reloaded${reason}: ${n} subgraph${n === 1 ? '' : 's'}.`
-          );
-        }
-        return result;
-      })
+    const runOnce = async () => {
+      const result = await temp.loadFromServer(pid);
+      if (result?.ok) {
+        const n = result.subgraphCount != null ? result.subgraphCount : '?';
+        const reason = opts?.reason ? ` (${opts.reason})` : '';
+        Composer.setStatus?.(
+          `Temporary subgraphs reloaded${reason}: ${n} subgraph${n === 1 ? '' : 's'}.`
+        );
+      }
+      return result;
+    };
+
+    Composer._tempListReloadPromise = runOnce()
       .catch((err) => {
         console.warn('Composer.reloadTemporaryContextFromServer', err);
         return { ok: false, message: (err && err.message) || String(err) };
       })
-      .finally(() => {
+      .finally(async () => {
         Composer._tempListReloadPromise = null;
+        if (Composer._tempListReloadFollowUp) {
+          Composer._tempListReloadFollowUp = false;
+          try {
+            await Composer.reloadTemporaryContextFromServer(pid, {
+              reason: opts?.reason ? `${opts.reason} follow-up` : 'follow-up',
+            });
+          } catch (err) {
+            console.warn('Composer.reloadTemporaryContextFromServer follow-up', err);
+          }
+        }
       });
 
     return Composer._tempListReloadPromise;
@@ -965,17 +978,45 @@ window.Widgets.Composer = window.Widgets.Composer || {};
    */
   Composer._reloadTemporaryContextIfNewFinished = async function (payload) {
     const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+    const yaml = Widgets.ComposerWorkflow?.getWorkflowYaml?.() || '';
     const fresh = steps.filter((step) => {
       const stepId = step?.step_id || step?.stepId;
       if (!stepId || Composer._reloadedTempStepIds.has(stepId)) return false;
-      return String(step.scan_status || '').toUpperCase() === 'FINISHED';
+      if (String(step.scan_status || '').toUpperCase() !== 'FINISHED') return false;
+      const exportMode = Widgets.ComposerTempGraph?.parseStepContextExport?.(
+        yaml,
+        String(stepId)
+      );
+      return exportMode === 'scan_graph';
     });
     if (!fresh.length) return false;
-    fresh.forEach((step) => {
-      const stepId = step.step_id || step.stepId;
-      if (stepId) Composer._reloadedTempStepIds.add(String(stepId));
+
+    if (Composer._tempListReloadPromise) {
+      Composer._tempListReloadFollowUp = true;
+    }
+
+    const result = await Composer.reloadTemporaryContextFromServer(null, {
+      reason: 'step FINISHED',
     });
-    await Composer.reloadTemporaryContextFromServer(null, { reason: 'step FINISHED' });
+    if (result?.ok) {
+      const names = new Set(
+        (Widgets.ComposerTempGraph?.getSubgraphs?.() || []).map((sg) => {
+          const label = sg.scanName || sg.stepId || sg.label;
+          return label != null ? String(label) : '';
+        })
+      );
+      fresh.forEach((step) => {
+        const stepId = step?.step_id || step?.stepId;
+        if (!stepId) return;
+        const sid = String(stepId);
+        const exportMode = Widgets.ComposerTempGraph?.parseStepContextExport?.(yaml, sid);
+        if (exportMode !== 'scan_graph') {
+          Composer._reloadedTempStepIds.add(sid);
+          return;
+        }
+        if (names.has(sid)) Composer._reloadedTempStepIds.add(sid);
+      });
+    }
     return true;
   };
 
@@ -1304,6 +1345,7 @@ window.Widgets.Composer = window.Widgets.Composer || {};
     // Stop poller first — in-flight FINISHED reloads were repainting temps after clear.
     Composer.stopStatusPoller();
     Composer._tempListReloadPromise = null;
+    Composer._tempListReloadFollowUp = false;
     Composer._reloadedTempStepIds = new Set();
     Composer.clearWorkflowStatuses({});
     if (btn) {
