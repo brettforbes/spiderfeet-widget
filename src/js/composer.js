@@ -1301,6 +1301,10 @@ window.Widgets.Composer = window.Widgets.Composer || {};
 
     const btn = document.getElementById('composer-reset-workflow');
     Composer._workflowResetBusy = true;
+    // Stop poller first — in-flight FINISHED reloads were repainting temps after clear.
+    Composer.stopStatusPoller();
+    Composer._tempListReloadPromise = null;
+    Composer._reloadedTempStepIds = new Set();
     Composer.clearWorkflowStatuses({});
     if (btn) {
       btn.disabled = true;
@@ -1323,13 +1327,12 @@ window.Widgets.Composer = window.Widgets.Composer || {};
         return result || null;
       }
 
+      // Backend wiped temps; leave the viewer empty until next Run / Scan Now.
+      // Do not loadProjectContexts here — that re-GET raced with stale poll reloads
+      // and put the previous temporary graphs straight back on the canvas.
       const temp = Widgets.ComposerTempGraph;
       if (temp?.clear) temp.clear();
       else Composer.mountCanvasGraph('temp-subgraph', { nodes: [], links: [] });
-
-      if (projectId) {
-        await Composer.loadProjectContexts(projectId);
-      }
 
       const stepId = Composer._selectedStepId;
       if (stepId && Composer.handleStepSelected) {

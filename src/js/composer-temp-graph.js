@@ -41,21 +41,81 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   /** @type {string|null} project id that owns `_temporarySubgraphId` / loaded graph */
   ComposerTempGraph._loadedForProjectId = null;
   ComposerTempGraph._sending = false;
+  /** Bumped on clear / newer load so stale GETs cannot repaint after Reset. */
+  ComposerTempGraph._loadGeneration = 0;
 
   /**
-   * Label for a server subgraph entry (scan_name preferred).
-   * @param {{ scan_name?: string, scan_description?: string|null, temporary_subgraph_id?: string }} entry
+   * True when a string looks like a TypeDB temporary_subgraph id (not a chip label).
+   * @param {string} value
+   * @returns {boolean}
+   */
+  ComposerTempGraph.isSubgraphIdLabel = function (value) {
+    const s = value != null ? String(value).trim() : '';
+    return (
+      /^temporary-subgraph--/i.test(s) ||
+      /^subgraph--/i.test(s) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+    );
+  };
+
+  /**
+   * Most common membership stamp on nodes (``source``) or edges (``scan_name``).
+   * @param {{ nodes?: object[], edges?: object[] }} entry
+   * @returns {string|null}
+   */
+  ComposerTempGraph.inferSourceLabel = function (entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const counts = Object.create(null);
+    const bump = (raw) => {
+      const s = raw != null ? String(raw).trim() : '';
+      if (!s || ComposerTempGraph.isSubgraphIdLabel(s)) return;
+      counts[s] = (counts[s] || 0) + 1;
+    };
+    (Array.isArray(entry.nodes) ? entry.nodes : []).forEach((n) => {
+      if (n && typeof n === 'object') bump(n.source);
+    });
+    (Array.isArray(entry.edges) ? entry.edges : []).forEach((e) => {
+      if (e && typeof e === 'object') bump(e.scan_name);
+    });
+    let best = null;
+    let bestCount = 0;
+    Object.keys(counts).forEach((key) => {
+      if (counts[key] > bestCount) {
+        best = key;
+        bestCount = counts[key];
+      }
+    });
+    return best;
+  };
+
+  /**
+   * Chip label: YAML scan step id / ``target`` (never temporary_subgraph uuid).
+   * @param {{ scan_name?: string, scan_description?: string|null, temporary_subgraph_id?: string, nodes?: object[], edges?: object[], label?: string, scanName?: string, stepId?: string }} entry
    * @returns {string}
    */
   ComposerTempGraph.subgraphLabel = function (entry) {
     if (!entry || typeof entry !== 'object') return 'subgraph';
-    const name = entry.scan_name != null ? String(entry.scan_name).trim() : '';
-    if (name) return name;
+    const candidates = [
+      entry.scan_name,
+      entry.scanName,
+      entry.stepId,
+      entry.label,
+      ComposerTempGraph.inferSourceLabel(entry),
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const raw = candidates[i];
+      const name = raw != null ? String(raw).trim() : '';
+      if (name && !ComposerTempGraph.isSubgraphIdLabel(name)) return name;
+    }
+    // Description only as last resort (not a uuid).
     const desc =
-      entry.scan_description != null ? String(entry.scan_description).trim() : '';
-    if (desc) return desc;
-    const id = entry.temporary_subgraph_id || entry.subgraph_id;
-    return id ? String(id) : 'subgraph';
+      entry.scan_description != null
+        ? String(entry.scan_description).trim()
+        : entry.scanDescription != null
+          ? String(entry.scanDescription).trim()
+          : '';
+    if (desc && !ComposerTempGraph.isSubgraphIdLabel(desc)) return desc;
+    return 'subgraph';
   };
 
   /**
@@ -67,11 +127,9 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     if (!entry || typeof entry !== 'object') return null;
     const subgraphId =
       entry.temporary_subgraph_id || entry.subgraph_id || `subgraph--${ComposerTempGraph.uuidv4()}`;
-    const scanName = entry.scan_name != null ? String(entry.scan_name) : null;
+    const scanNameRaw = entry.scan_name != null ? String(entry.scan_name).trim() : '';
     const scanDescription =
       entry.scan_description != null ? String(entry.scan_description) : null;
-    const label = ComposerTempGraph.subgraphLabel(entry);
-    const stepId = scanName && scanName !== 'target' ? scanName : null;
 
     const nodes = (Array.isArray(entry.nodes) ? entry.nodes : []).map((raw) => {
       if (!raw || typeof raw !== 'object') return raw;
@@ -82,7 +140,6 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         node.id = String(tid);
       }
       node.subgraph_id = subgraphId;
-      if (scanName && node.source == null) node.source = scanName;
       return node;
     });
 
@@ -90,19 +147,80 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
       if (!raw || typeof raw !== 'object') return raw;
       const edge = Object.assign({}, raw);
       edge.subgraph_id = subgraphId;
-      if (scanName && edge.scan_name == null) edge.scan_name = scanName;
       return edge;
     });
+
+    // Resolve display/source name before stamping blanks onto nodes.
+    const inferred = ComposerTempGraph.inferSourceLabel({ nodes, edges });
+    const scanName =
+      scanNameRaw && !ComposerTempGraph.isSubgraphIdLabel(scanNameRaw)
+        ? scanNameRaw
+        : inferred;
+    const label = ComposerTempGraph.subgraphLabel({
+      scan_name: scanName,
+      scan_description: scanDescription,
+      nodes,
+      edges,
+    });
+    const stepId = scanName && scanName !== 'target' ? scanName : null;
+
+    nodes.forEach((node) => {
+      if (node && typeof node === 'object' && scanName && node.source == null) {
+        node.source = scanName;
+      }
+    });
+    edges.forEach((edge) => {
+      if (edge && typeof edge === 'object' && scanName && edge.scan_name == null) {
+        edge.scan_name = scanName;
+      }
+    });
+
+    const producedAt =
+      entry.produced_at != null
+        ? String(entry.produced_at)
+        : entry.producedAt != null
+          ? String(entry.producedAt)
+          : null;
 
     return {
       subgraphId: String(subgraphId),
       stepId,
-      scanName,
+      scanName: scanName || null,
       scanDescription,
+      producedAt,
       label,
       nodes,
       edges,
     };
+  };
+
+  /**
+   * Production order for chips: earliest ``produced_at`` first (matches backend GET sort).
+   * Legacy rows without timestamp: ``target`` first, then timestamped, then rest.
+   * @param {object[]} entries
+   * @returns {object[]}
+   */
+  ComposerTempGraph.sortSubgraphsByProducedAt = function (entries) {
+    const list = Array.isArray(entries) ? entries.slice() : [];
+    const sortKey = (entry) => {
+      if (!entry || typeof entry !== 'object') return 'zzz';
+      const produced =
+        entry.produced_at != null
+          ? String(entry.produced_at)
+          : entry.producedAt != null
+            ? String(entry.producedAt)
+            : '';
+      if (produced) return produced;
+      return String(entry.scan_name || '') === 'target' ? '0' : 'zzz';
+    };
+    list.sort((a, b) => {
+      const cmp = sortKey(a).localeCompare(sortKey(b));
+      if (cmp !== 0) return cmp;
+      const idA = String(a?.temporary_subgraph_id || a?.subgraph_id || '');
+      const idB = String(b?.temporary_subgraph_id || b?.subgraph_id || '');
+      return idA.localeCompare(idB);
+    });
+    return list;
   };
 
   /**
@@ -112,7 +230,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
    */
   ComposerTempGraph.loadSubgraphsFromList = function (subgraphEntries) {
     ComposerTempGraph._subgraphs = [];
-    const list = Array.isArray(subgraphEntries) ? subgraphEntries : [];
+    const list = ComposerTempGraph.sortSubgraphsByProducedAt(subgraphEntries);
     list.forEach((entry) => {
       const normalized = ComposerTempGraph.normalizeServerSubgraph(entry);
       if (!normalized) return;
@@ -614,7 +732,9 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         ComposerTempGraph.SUBGRAPH_PALETTE[
           index % ComposerTempGraph.SUBGRAPH_PALETTE.length
         ];
-      const label = sg.label || sg.scanName || `Import ${index + 1}`;
+      // Chip text = source (target / YAML step id), never temporary_subgraph uuid.
+      const label = ComposerTempGraph.subgraphLabel(sg) || `Import ${index + 1}`;
+      sg.label = label;
       const nodeCount = (sg.nodes || []).length;
       const desc = sg.scanDescription ? ` — ${sg.scanDescription}` : '';
       const title = `${label}${desc} (${nodeCount} nodes)`;
@@ -734,6 +854,7 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
   };
 
   ComposerTempGraph.clear = function () {
+    ComposerTempGraph._loadGeneration += 1;
     ComposerTempGraph._subgraphs = [];
     ComposerTempGraph._lastOutboundPayload = null;
     // SPEC-016 B1 — never reuse another project's subgraph id after clear/switch.
@@ -757,11 +878,15 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
       return { ok: false, message: 'SpiderfeetApi.getTemporaryContext unavailable.' };
     }
 
-    ComposerTempGraph.clear();
+    // Do not clear before fetch — that flashed an empty viewer while steps ran.
     ComposerTempGraph._loadedForProjectId = pid;
+    const loadGen = (ComposerTempGraph._loadGeneration += 1);
 
     try {
       const result = await Api.getTemporaryContext(pid);
+      if (loadGen !== ComposerTempGraph._loadGeneration) {
+        return { ok: true, skipped: true, subgraphCount: ComposerTempGraph._subgraphs.length };
+      }
       if (!result || result.ok === false) {
         return {
           ok: false,
@@ -770,10 +895,23 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         };
       }
 
-      const subgraphs = Array.isArray(result.subgraphs) ? result.subgraphs : [];
+      const subgraphs = ComposerTempGraph.sortSubgraphsByProducedAt(
+        Array.isArray(result.subgraphs) ? result.subgraphs : []
+      );
+      // Dedupe identical scan_name=target chips if server still has race leftovers.
+      const seenTarget = { done: false };
+      const filtered = subgraphs.filter((sg) => {
+        if (!sg || String(sg.scan_name || '') !== 'target') return true;
+        if (seenTarget.done) return false;
+        seenTarget.done = true;
+        return true;
+      });
+      if (loadGen !== ComposerTempGraph._loadGeneration) {
+        return { ok: true, skipped: true, subgraphCount: ComposerTempGraph._subgraphs.length };
+      }
       const targetSg =
-        subgraphs.find((sg) => sg && String(sg.scan_name || '') === 'target') ||
-        subgraphs[0] ||
+        filtered.find((sg) => sg && String(sg.scan_name || '') === 'target') ||
+        filtered[0] ||
         null;
       const sgId =
         targetSg?.temporary_subgraph_id ||
@@ -781,8 +919,10 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
         result.temporary_subgraph_id ||
         null;
       if (sgId) ComposerTempGraph._temporarySubgraphId = String(sgId);
+      else ComposerTempGraph._temporarySubgraphId = null;
 
-      const count = ComposerTempGraph.loadSubgraphsFromList(subgraphs);
+      // Replace in place after fetch (API order = production order).
+      const count = ComposerTempGraph.loadSubgraphsFromList(filtered);
       let nodeCount = 0;
       ComposerTempGraph._subgraphs.forEach((sg) => {
         nodeCount += (sg.nodes || []).length;
@@ -805,20 +945,40 @@ window.Widgets.ComposerTempGraph = window.Widgets.ComposerTempGraph || {};
     const subgraphId = `subgraph--${ComposerTempGraph.uuidv4()}`;
     const assigned = ComposerTempGraph.assignTemporaryIds(scanGraph, subgraphId);
     const importIndex = ComposerTempGraph._subgraphs.length + 1;
-    const stepId = meta?.stepId != null ? String(meta.stepId) : null;
+    const stepId =
+      meta?.stepId != null && String(meta.stepId).trim()
+        ? String(meta.stepId).trim()
+        : null;
+    const scanName = stepId;
+    if (scanName) {
+      assigned.nodes.forEach((node) => {
+        if (node && typeof node === 'object' && node.source == null) {
+          node.source = scanName;
+        }
+      });
+      assigned.edges.forEach((edge) => {
+        if (edge && typeof edge === 'object' && edge.scan_name == null) {
+          edge.scan_name = scanName;
+        }
+      });
+    }
+    const label =
+      ComposerTempGraph.subgraphLabel({
+        scan_name: scanName,
+        stepId,
+        nodes: assigned.nodes,
+        edges: assigned.edges,
+      }) || `Import ${importIndex}`;
     const subgraph = {
       subgraphId,
       stepId,
+      scanName,
       importedAt: new Date().toISOString(),
-      label: `Import ${importIndex}`,
+      label,
       nodes: assigned.nodes,
       edges: assigned.edges,
     };
     ComposerTempGraph._subgraphs.push(subgraph);
-    // Relabel so indices stay contiguous after removals.
-    ComposerTempGraph._subgraphs.forEach((sg, i) => {
-      sg.label = `Import ${i + 1}`;
-    });
     ComposerTempGraph.refreshViewer();
 
     return subgraph;
